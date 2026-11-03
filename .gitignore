@@ -1,0 +1,33 @@
+# Secrets (never commit). Connection strings and keys come from user-secrets
+# (development) or environment variables (Railway).
+.env
+.env.*
+!.env.example
+appsettings.Development.json
+appsettings.*.local.json
+*.pfx
+*.key
+secrets/
+
+# Local-only database scripts (e.g. the generated demo seed: environment specific)
+db/local/
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.log
+
+# IDEs (shareable VS Code extension recommendations are kept)
+.idea/
+*.sln.iml
+.vscode/*
+!.vscode/extensions.json
+
+# Operating system
+.DS_Store
+Thumbs.db
+desktop.ini
