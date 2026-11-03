@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Chatbot.Application\Chatbot.Application.csproj" />
+    <ProjectReference Include="..\Chatbot.Domain\Chatbot.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

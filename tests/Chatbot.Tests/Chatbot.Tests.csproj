@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Chatbot.Api\Chatbot.Api.csproj" />
+    <ProjectReference Include="..\..\src\Chatbot.Application\Chatbot.Application.csproj" />
+    <ProjectReference Include="..\..\src\Chatbot.Domain\Chatbot.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Chatbot.Infrastructure\Chatbot.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
