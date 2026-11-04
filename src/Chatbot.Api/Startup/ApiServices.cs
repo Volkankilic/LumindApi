@@ -42,6 +42,13 @@ public static class ApiServices
                 };
             });
 
+        // The OpenAPI generator reads the minimal-API JSON options, not the MVC ones above: give it the same enum rule
+        // (camelCase strings) and strict numbers, so the document describes exactly what goes over the wire.
+        services.ConfigureHttpJsonOptions(o =>
+        {
+            o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+            o.SerializerOptions.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.Strict;
+        });
         services.AddOpenApi();
 
         // --- authentication: access JWT in the Authorization header

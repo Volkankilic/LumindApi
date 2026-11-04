@@ -14,6 +14,11 @@ if (!string.IsNullOrWhiteSpace(port))
 {
     builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 }
+else if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+{
+    // Same address with and without `--no-launch-profile` (the client's dev proxy points here).
+    builder.WebHost.UseUrls("http://localhost:5080");
+}
 
 // Structured logging. The request log is our own middleware (method, route template, status, duration); content,
 // nicknames, codes, tokens and query strings are never logged. Microsoft.* stays at Warning so the framework's own

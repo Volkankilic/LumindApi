@@ -34,10 +34,12 @@ public class ConversationsController(IConversationService conversations, IChatSe
 
     /// <summary>Newest first. No message content.</summary>
     [HttpGet]
+    [ProducesResponseType<IReadOnlyList<ConversationSummaryDto>>(StatusCodes.Status200OK)]
     public Task<IReadOnlyList<ConversationSummaryDto>> List(CancellationToken ct) =>
         conversations.ListAsync(HttpContext.ParticipantId(), ct);
 
     [HttpGet("{id:guid}")]
+    [ProducesResponseType<ConversationDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public Task<ConversationDetailDto> Get(Guid id, CancellationToken ct) =>
         conversations.GetAsync(HttpContext.ParticipantId(), id, ct);
