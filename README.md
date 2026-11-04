@@ -98,6 +98,12 @@ Veritabanı şeması **`api/db/` altındaki SQL betikleriyle elle uygulanır**. 
 
 ## Railway notu
 
+Üretim (Production) davranışları ve değişken **adları**: [docs/yayin-railway.md](../docs/yayin-railway.md), karar: [ADR 006](../docs/decisions/006-railway-yayini-tek-kok.md). Özet:
+
+- `PORT` varken uygulama `http://[::]:PORT` dinler (IPv4 + IPv6, Railway özel ağı).
+- **Production'da `Auth__CookieSecure=false` ise uygulama başlamaz.** Dev uç noktaları, OpenAPI, kriz yer tutucusu ve dev tetikleyicileri Production'da yoktur (testli).
+- İstemcinin önündeki Caddy gerçek istemci adresini tek değerli `X-Forwarded-For` olarak yazar; API yönlendirme başlıklarına yalnızca `ForwardedHeaders__KnownNetworks__*` ile verilen **özel ağdan** güvenir (sıçrama sınırı 1). API'nin genel adresi **kapalı** tutulur.
+
 Yayın ortamı değişkenleri kök README'deki "Railway'e yayınlama" bölümündedir. Railway ortamında **yalnızca sentetik demo verisi** tutulur.
 
 ## İlgili depo
