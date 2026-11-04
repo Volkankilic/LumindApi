@@ -1,8 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Chatbot.Application\Chatbot.Application.csproj" />
     <ProjectReference Include="..\Chatbot.Domain\Chatbot.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared framework only (IHostEnvironment, configuration): no extra package. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- Design time only: `dotnet ef dbcontext script` drafts api/db/001_initial.sql. Never used to change a database. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

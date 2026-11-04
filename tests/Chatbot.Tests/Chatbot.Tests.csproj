@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>88ff48d7-a4e7-4288-a5f8-e4c32e6559e9</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
