@@ -1,5 +1,5 @@
 -- =====================================================================================
--- verify.sql : READ-ONLY check that 001_initial.sql was applied correctly
+-- verify.sql : READ-ONLY check that 001_initial.sql and 002_retention_indexes.sql were applied correctly
 -- =====================================================================================
 -- Only SELECTs: changes nothing. Run it after 001_initial.sql (and again after any later script).
 -- It returns ONE result table: one row per check, column "ok" is true/false, and the last
@@ -70,7 +70,10 @@ expected_indexes (index_name, pattern) AS (
     ('ux_refresh_tokens_token_hash',                 '%UNIQUE%(token_hash)%'),
     ('ix_refresh_tokens_family',                     '%(family_id)%'),
     ('ix_refresh_tokens_participant',                '%(participant_id)%'),
-    ('ix_audit_logs_actor_time',                     '%(actor_id, %timestamp%)%')
+    ('ix_audit_logs_actor_time',                     '%(actor_id, %timestamp%)%'),
+    -- 002_retention_indexes.sql
+    ('ix_audit_logs_timestamp',                      '%("timestamp")%'),
+    ('ix_audit_logs_anonymous_timestamp',            '%("timestamp")%WHERE (actor_type = ''Anonymous''%')
 ),
 expected_constraints (constraint_name, table_name, kind) AS (
     VALUES
@@ -139,6 +142,10 @@ checks AS (
     UNION ALL
     SELECT 6, 'schema version 1 (initial) is recorded',
            COALESCE((SELECT true FROM public.app_schema_version WHERE version = 1 AND name = 'initial'), false)
+
+    UNION ALL
+    SELECT 6, 'schema version 2 (retention_indexes) is recorded',
+           COALESCE((SELECT true FROM public.app_schema_version WHERE version = 2 AND name = 'retention_indexes'), false)
 ),
 report AS (
     SELECT sort, check_name, ok FROM checks

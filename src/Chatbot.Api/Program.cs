@@ -21,6 +21,9 @@ else if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(Enviro
     builder.WebHost.UseUrls("http://localhost:5080");
 }
 
+// A request body is at most a few kilobytes of JSON: 64 KB is far above any legitimate request (Kestrel default is 30 MB).
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = ApiLimits.MaxRequestBodyBytes);
+
 // Structured logging. The request log is our own middleware (method, route template, status, duration); content,
 // nicknames, codes, tokens and query strings are never logged. Microsoft.* stays at Warning so the framework's own
 // request and SQL logs (which carry paths and query strings) are off.
@@ -61,6 +64,7 @@ if (forwarded is not null)
     app.UseForwardedHeaders(forwarded);
 }
 
+app.UseMiddleware<ApiHardeningMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseStatusCodePages(context => Problems.WriteAsync(

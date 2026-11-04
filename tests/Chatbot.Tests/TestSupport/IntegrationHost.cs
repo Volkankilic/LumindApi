@@ -142,7 +142,10 @@ public static class IntegrationClient
     public static async Task<Session> SignInAsync(this ApiFactory factory, TestParticipant participant)
     {
         var (response, cookie) = await factory.PostCodeAsync(participant.Code);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"sign-in answered {(int)response.StatusCode}; last server log lines: "
+            + string.Join(" | ", factory.Logs.Rendered().TakeLast(3).Select(l => l[..Math.Min(l.Length, 300)])));
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
         var token = body.GetProperty("accessToken").GetString()!;
         var client = factory.NewClient();

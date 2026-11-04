@@ -1,3 +1,4 @@
+using Chatbot.Application.Abstractions;
 using Chatbot.Domain;
 using Chatbot.Domain.Entities;
 
@@ -35,13 +36,13 @@ public sealed record ConversationDetailDto(
 public interface IConversationService
 {
     /// <summary>Ends the participant's active conversation (if any) and starts a new one, in one transaction.</summary>
-    Task<ConversationDto> StartAsync(Guid participantId, CancellationToken ct);
+    Task<ConversationDto> StartAsync(Guid participantId, ClientInfo client, CancellationToken ct);
 
     /// <summary>Newest first. No message content.</summary>
-    Task<IReadOnlyList<ConversationSummaryDto>> ListAsync(Guid participantId, CancellationToken ct);
+    Task<IReadOnlyList<ConversationSummaryDto>> ListAsync(Guid participantId, ClientInfo client, CancellationToken ct);
 
-    Task<ConversationDetailDto> GetAsync(Guid participantId, Guid conversationId, CancellationToken ct);
+    Task<ConversationDetailDto> GetAsync(Guid participantId, Guid conversationId, ClientInfo client, CancellationToken ct);
 
     /// <summary>Idempotent: the end time is written only the first time.</summary>
-    Task EndAsync(Guid participantId, Guid conversationId, CancellationToken ct);
+    Task EndAsync(Guid participantId, Guid conversationId, ClientInfo client, CancellationToken ct);
 }

@@ -80,16 +80,16 @@ public sealed class StubParticipantService : IParticipantService
 
 public sealed class StubConversationService : IConversationService
 {
-    public Task<ConversationDto> StartAsync(Guid participantId, CancellationToken ct) =>
+    public Task<ConversationDto> StartAsync(Guid participantId, ClientInfo client, CancellationToken ct) =>
         Task.FromResult(new ConversationDto(Guid.NewGuid(), DateTimeOffset.UtcNow, null));
 
-    public Task<IReadOnlyList<ConversationSummaryDto>> ListAsync(Guid participantId, CancellationToken ct) =>
+    public Task<IReadOnlyList<ConversationSummaryDto>> ListAsync(Guid participantId, ClientInfo client, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<ConversationSummaryDto>>([]);
 
-    public Task<ConversationDetailDto> GetAsync(Guid participantId, Guid conversationId, CancellationToken ct) =>
+    public Task<ConversationDetailDto> GetAsync(Guid participantId, Guid conversationId, ClientInfo client, CancellationToken ct) =>
         throw AppException.NotFound();
 
-    public Task EndAsync(Guid participantId, Guid conversationId, CancellationToken ct) => throw AppException.NotFound();
+    public Task EndAsync(Guid participantId, Guid conversationId, ClientInfo client, CancellationToken ct) => throw AppException.NotFound();
 }
 
 public sealed class StubChatService : IChatService

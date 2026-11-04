@@ -40,10 +40,17 @@ public static class DependencyInjection
         services.AddSingleton(sp => Bind<DatabaseOptions>(sp, DatabaseOptions.Section));
 
         // EF Core is only the ORM: no Migrate(), no EnsureCreated() anywhere. The schema comes from api/db/*.sql.
+        // Field encryption (message content, nickname) and audit protection live in one interceptor (ADR 007).
+        services.AddSingleton<IFieldProtector, AesGcmFieldProtector>();
+        services.AddSingleton<FieldEncryptionInterceptor>();
         services.AddDbContext<AppDbContext>((sp, options) =>
-            options.UseNpgsql(sp.GetRequiredService<IConfiguration>().GetConnectionString("Default")));
+            options
+                .UseNpgsql(sp.GetRequiredService<IConfiguration>().GetConnectionString("Default"))
+                .AddInterceptors(sp.GetRequiredService<FieldEncryptionInterceptor>()));
 
         services.AddSingleton<ISecretHasher, SecretHasher>();
+        services.AddSingleton<AuthFailureBudget>();
+        services.AddScoped<Chatbot.Infrastructure.Retention.RetentionService>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IParticipantAccess, ParticipantAccess>();
@@ -54,7 +61,8 @@ public static class DependencyInjection
 
         services.AddSingleton<ConversationLocks>();
         services.AddScoped<IChatService, ChatService>();
-        services.AddSingleton<IPiiRedactor, NoopPiiRedactor>();
+        // Rule-based masking for text bound for a model provider (phase 6 connects it; no model exists today).
+        services.AddSingleton<IPiiRedactor, Chatbot.Infrastructure.Privacy.RulePiiRedactor>();
         services.AddSingleton<ICrisisResponseProvider, CrisisResponseProvider>();
 
         // Real crisis detection arrives in phase 5. Until then: nothing is flagged, except the clearly marked

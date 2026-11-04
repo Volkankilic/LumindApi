@@ -154,12 +154,38 @@ public static class ApiServices
 
         services.AddHostedService<ConfigurationValidationService>();
         services.AddHostedService<SchemaCheckService>();
+        services.AddHostedService<RetentionHostedService>();
         return services;
     }
 
     /// <summary>The client key of the rate limiters. Behind a proxy it is the real IP only when forwarded headers are configured.</summary>
-    public static string ClientKey(HttpContext http) =>
-        "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    public static string ClientKey(HttpContext http) => "ip:" + RateLimitAddress(http.Connection.RemoteIpAddress);
+
+    /// <summary>
+    /// IPv4 as is. IPv6 is reduced to its /64 prefix: one subscriber normally gets a whole /64, so keying on the full
+    /// address would let a single client dodge the limit by changing the lower 64 bits on every request.
+    /// </summary>
+    public static string RateLimitAddress(System.Net.IPAddress? address)
+    {
+        if (address is null)
+        {
+            return "unknown";
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            return address.ToString();
+        }
+
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new System.Net.IPAddress(bytes) + "/64";
+    }
 
     /// <summary>
     /// Trusts forwarded headers ONLY from proxies named in configuration (ForwardedHeaders:KnownProxies / KnownNetworks).

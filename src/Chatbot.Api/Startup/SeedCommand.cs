@@ -5,7 +5,7 @@ using Chatbot.Infrastructure.Seed;
 namespace Chatbot.Api.Startup;
 
 /// <summary>
-/// `generate-seed [--out path]`: writes the seed SQL script (hashes only). It does not connect to any database and
+/// `generate-seed [--out path]`: writes the seed SQL script (hashes only) and prints the NEW plain codes to the terminal. It does not connect to any database and
 /// is refused outside Development; the script is run by hand, never by the application.
 /// </summary>
 public static class SeedCommand
@@ -33,6 +33,8 @@ public static class SeedCommand
             connectionString: null,
             corsOrigins: [],
             requireDatabase: false);
+        // Nicknames and message text are written encrypted, so the seed needs the same data encryption keys as the API.
+        problems = [.. problems, .. OptionsValidator.ValidateEncryption(services.GetRequiredService<PrivacyOptions>())];
         if (problems.Count > 0)
         {
             error.WriteLine("Cannot generate the seed: " + string.Join(" ", problems));
@@ -45,10 +47,19 @@ public static class SeedCommand
             : Path.GetFullPath(Path.Combine(environment.ContentRootPath, "..", "..", "db", "local", "seed.sql"));
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, services.GetRequiredService<SeedSqlGenerator>().Generate(), new UTF8Encoding(false));
+        var seed = services.GetRequiredService<SeedSqlGenerator>().Generate();
+        File.WriteAllText(path, seed.Sql, new UTF8Encoding(false));
 
         output.WriteLine($"Wrote {path}");
-        output.WriteLine("Synthetic data only. Contains code hashes, no plain codes and no pepper. Run it by hand after 001_initial.sql and verify.sql.");
+        output.WriteLine("Synthetic data only. The file has code hashes (no plain codes, no pepper); nicknames and message text are encrypted.");
+        output.WriteLine("Run reset-seed-data.sql, then this file, by hand. Never run this file before the reset.");
+        output.WriteLine();
+        output.WriteLine("NEW participant codes. They are shown ONLY here (not in the file, not in a log): note them now.");
+        foreach (var code in seed.Codes)
+        {
+            output.WriteLine($"  {code.Label}: {code.Code}");
+        }
+
         return 0;
     }
 }

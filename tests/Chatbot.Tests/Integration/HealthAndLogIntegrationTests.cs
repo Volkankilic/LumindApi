@@ -26,7 +26,7 @@ public class HealthAndLogIntegrationTests(IntegrationHost host) : IClassFixture<
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var schema = (await response.ReadJsonAsync()).GetProperty("schema");
-        Assert.Equal(1, schema.GetProperty("expected").GetInt32());
+        Assert.Equal(new Chatbot.Application.Options.DatabaseOptions().ExpectedSchemaVersion, schema.GetProperty("expected").GetInt32());
         Assert.True(schema.GetProperty("found").GetInt32() >= 1);
     }
 

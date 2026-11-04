@@ -162,7 +162,7 @@ public class ProductionStartupTests
     {
         var problems = OptionsValidator.Validate(
             new AuthOptions { JwtSigningKey = new string('j', 40), CodePepper = new string('p', 40), CookieSecure = false },
-            new PrivacyOptions { IpHashKey = new string('i', 40) },
+            TestEncryption.Privacy(),
             new DocumentsOptions(),
             new ChatOptions(),
             "Host=x",
@@ -176,7 +176,7 @@ public class ProductionStartupTests
     public void TheValidator_RefusesAnInsecureCookieInProductionOnly()
     {
         var insecure = new AuthOptions { JwtSigningKey = new string('j', 40), CodePepper = new string('p', 40), CookieSecure = false };
-        var problems = OptionsValidator.Validate(insecure, new PrivacyOptions { IpHashKey = new string('i', 40) }, new DocumentsOptions(), new ChatOptions(), "Host=x", [], true, production: true);
+        var problems = OptionsValidator.Validate(insecure, TestEncryption.Privacy(), new DocumentsOptions(), new ChatOptions(), "Host=x", [], true, production: true);
         Assert.Contains(problems, p => p.Contains("Auth:CookieSecure", StringComparison.Ordinal));
         Assert.DoesNotContain(problems, p => p.Contains(new string('p', 40), StringComparison.Ordinal));
     }

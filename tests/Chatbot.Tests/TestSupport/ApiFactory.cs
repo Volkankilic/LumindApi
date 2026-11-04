@@ -3,7 +3,10 @@ using Chatbot.Application.Chat;
 using Chatbot.Application.Conversations;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Chatbot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -50,6 +53,8 @@ public sealed class ApiFactory(
         ["Auth:JwtSigningKey"] = new string('j', 48),
         ["Auth:CodePepper"] = new string('p', 48),
         ["Privacy:IpHashKey"] = new string('i', 48),
+        [$"Privacy:DataEncryptionKeys:{TestEncryption.KeyId}"] = TestEncryption.KeyBase64,
+        ["Privacy:CurrentDataEncryptionKeyId"] = TestEncryption.KeyId,
         ["ConnectionStrings:Default"] = "Host=127.0.0.1;Port=1;Database=none;Timeout=1",
         ["Chat:Fake:FirstTokenDelayMs"] = "0",
         ["Chat:Fake:TokenDelayMs"] = "0",
@@ -91,6 +96,10 @@ public sealed class ApiFactory(
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(merged));
         builder.ConfigureServices(services =>
         {
+            // Every test host has its own interceptor instance, so EF builds one internal service provider per host. A test run
+            // creates far more than twenty hosts and EF turns that warning into an exception (it stopped hosts at random). The
+            // application itself runs ONE host, where this cannot happen.
+            services.ConfigureDbContext<AppDbContext>(options => options.ConfigureWarnings(w => w.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.AddSingleton<ILogEventSink>(Logs);
             services.AddSingleton<IStartupFilter, TestPeerStartupFilter>();
             if (!stubServices)

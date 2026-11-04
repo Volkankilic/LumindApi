@@ -11,17 +11,30 @@ Tek bir Railway PostgreSQL veritabanı vardır (`railway`): yerel geliştirme, o
 | Dosya | Ne yapar | Ne zaman |
 |---|---|---|
 | `001_initial.sql` | Tüm tablolar, kısıtlar, indeksler, sürüm kaydı. Idempotent, tek transaction. | İlk kurulum |
-| `verify.sql` | **Salt-okunur** kontrol. Beklenen tablo/kolon/kısıt/indeks ve sürüm kaydı. Tek bir sonuç tablosu döner, son satır `SUMMARY`. | Her betikten sonra |
-| `local/seed.sql` | 5 sentetik tohum katılımcı (yalnızca kod **hash**'leri). `generate-seed` ile üretilir, `.gitignore`'dadır. Idempotent. | İsteğe bağlı, `verify.sql` yeşilse |
+| `002_retention_indexes.sql` | **Yalnızca iki indeks** (`audit_logs` zamana göre; saklama işi için) ve sürüm 2 kaydı. Veri ve kısıt değişmez. Idempotent, tek transaction. | `001`/`verify.sql` sonrası (Faz 4) |
+| `verify.sql` | **Salt-okunur** kontrol. Beklenen tablo/kolon/kısıt/indeks ve sürüm kayıtları (1 ve 2). Tek bir sonuç tablosu döner, son satır `SUMMARY`. | Her betikten sonra |
+| `local/seed.sql` | 5 sentetik tohum katılımcı: yalnızca kod **hash**'leri; rumuz ve mesaj metni **şifreli** (Faz 4). `generate-seed` ile üretilir ve her seferinde **yeni rastgele kodlar** seçer; düz kodlar **yalnızca terminale** bir kez yazılır (dosyaya, loga, commit'e girmez). `.gitignore`'dadır. Önce `reset-seed-data.sql`, sonra bu dosya. | İsteğe bağlı, `verify.sql` yeşilse |
 | `cleanup-test-data.sql` | Çöken entegrasyon testlerinden kalan `itest-` etiketli satırları siler. Yalnızca bu önekle çalışır. | Gerektiğinde |
 | `reset-seed-data.sql` | Yalnızca `seed-` etiketli katılımcıları ve bağlı satırlarını siler (veri, DDL değil). Yayın duman testinden (`docs/yayin-duman-testi.md`) sonra, ardından `local/seed.sql` yeniden çalıştırılır. | Elle duman testinden sonra |
+| `rollback/002_retention_indexes_down.sql` | Yalnızca iki indeksi ve sürüm 2 kaydını siler (veri değişmez). | Gerektiğinde |
 | `rollback/001_initial_down.sql` | **YIKICI.** Tüm tabloları ve verilerini siler. | Sıfırdan başlamak istediğinizde |
 
 ## Çalıştırma sırası (ilk kurulum)
 
 1. `001_initial.sql`
-2. `verify.sql` → son satır `SUMMARY: ALL OK (...)` ve tüm satırlarda `ok = true` olmalı
-3. `local/seed.sql` (yalnızca tohum katılımcıları isteniyorsa; önce `dotnet run --project src/Chatbot.Api -- generate-seed` ile üretilir)
+2. `002_retention_indexes.sql` (Faz 4)
+3. `verify.sql` → son satır `SUMMARY: ALL OK (...)` ve tüm satırlarda `ok = true` olmalı
+4. `local/seed.sql` (yalnızca tohum katılımcıları isteniyorsa; önce `dotnet run --project src/Chatbot.Api -- generate-seed` ile üretilir: **şifreleme anahtarı user-secrets'ta tanımlı olmalıdır** ve komut yeni düz kodları terminale yazar)
+
+## Faz 4 geçişi (mevcut veritabanı için, bu sırayla)
+
+Faz 4 ile sohbet içeriği ve rumuz **şifreli** yazılır; şifresiz eski satırlar okunamaz (uygulama onları **hata olarak** görür, sessizce düz metin saymaz). Veritabanında yalnızca sentetik veri olduğu için eski satırlar dönüştürülmez, **sıfırlanır**:
+
+1. **Anahtarı üret ve gir** (`docs/yayin-railway.md` → "Şifreleme anahtarı"): yerelde user-secrets, Railway'de API servisi değişkeni. Aynı değer, aynı `<id>`.
+2. **`002_retention_indexes.sql`** çalıştır, ardından `verify.sql` (tümü `ok = true`).
+3. **`reset-seed-data.sql`** çalıştır (yalnızca `seed-` katılımcıları ve bağlı satırları silinir). Başka (örn. elle denemelerle oluşmuş) şifresiz içerik varsa o katılımcıların da silinmesi gerekir; kontrol için: `SELECT count(*) FROM public.messages WHERE content NOT LIKE 'enc:v1:%';` ve `SELECT count(*) FROM public.participants WHERE nickname IS NOT NULL AND nickname NOT LIKE 'enc:v1:%';` ikisi de `0` olmalıdır.
+4. **`dotnet run --project src/Chatbot.Api -- generate-seed`**: yeni `local/seed.sql` üretilir, **5 yeni düz kod terminale yazılır** (not al). Sonra `local/seed.sql`'i çalıştır, `verify.sql`'i tekrar çalıştır.
+5. Ancak bundan sonra yeni API sürümünü **push et / dağıt**.
 
 ## Nasıl çalıştırılır
 
@@ -51,4 +64,4 @@ Betikler parola, kullanıcı adı, `CREATE DATABASE`, rol, extension ya da düz 
 
 ## Sürüm kayıtları
 
-`app_schema_version(version, name, applied_at)`: `001_initial.sql` → `1 / initial`.
+`app_schema_version(version, name, applied_at)`: `001_initial.sql` → `1 / initial`; `002_retention_indexes.sql` → `2 / retention_indexes`.

@@ -1,6 +1,7 @@
 using Chatbot.Api.Security;
 using Chatbot.Application;
 using Chatbot.Application.Abstractions;
+using Chatbot.Application.Options;
 using Chatbot.Domain.Rules;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Chatbot.Api.Controllers;
 [Authorize(Policy = Policies.Authenticated)]
 [Route("api")]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-public class MeController(IParticipantService participants) : ControllerBase
+public class MeController(IParticipantService participants, AuthOptions auth) : ControllerBase
 {
     [HttpGet("me")]
     [ProducesResponseType<ParticipantState>(StatusCodes.Status200OK)]
@@ -49,7 +50,7 @@ public class MeController(IParticipantService participants) : ControllerBase
     public async Task<NoContentResult> Delete(CancellationToken ct)
     {
         await participants.DeleteAsync(HttpContext.ParticipantId(), HttpContext.Client(), ct);
-        Response.Cookies.Delete(AuthController.RefreshCookie, new CookieOptions { Path = "/api/auth" });
+        Response.Cookies.Delete(AuthController.RefreshCookie, AuthController.RefreshCookieDeleteOptions(auth));
         return NoContent();
     }
 }

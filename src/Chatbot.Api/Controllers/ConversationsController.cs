@@ -28,7 +28,7 @@ public class ConversationsController(IConversationService conversations, IChatSe
     [ProducesResponseType<ConversationDto>(StatusCodes.Status201Created)]
     public async Task<ActionResult<ConversationDto>> Start(CancellationToken ct)
     {
-        var created = await conversations.StartAsync(HttpContext.ParticipantId(), ct);
+        var created = await conversations.StartAsync(HttpContext.ParticipantId(), HttpContext.Client(), ct);
         return Created($"/api/conversations/{created.Id}", created);
     }
 
@@ -36,13 +36,13 @@ public class ConversationsController(IConversationService conversations, IChatSe
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<ConversationSummaryDto>>(StatusCodes.Status200OK)]
     public Task<IReadOnlyList<ConversationSummaryDto>> List(CancellationToken ct) =>
-        conversations.ListAsync(HttpContext.ParticipantId(), ct);
+        conversations.ListAsync(HttpContext.ParticipantId(), HttpContext.Client(), ct);
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType<ConversationDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public Task<ConversationDetailDto> Get(Guid id, CancellationToken ct) =>
-        conversations.GetAsync(HttpContext.ParticipantId(), id, ct);
+        conversations.GetAsync(HttpContext.ParticipantId(), id, HttpContext.Client(), ct);
 
     /// <summary>Idempotent: the end time is written only by the first call.</summary>
     [HttpPost("{id:guid}/end")]
@@ -50,7 +50,7 @@ public class ConversationsController(IConversationService conversations, IChatSe
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<NoContentResult> End(Guid id, CancellationToken ct)
     {
-        await conversations.EndAsync(HttpContext.ParticipantId(), id, ct);
+        await conversations.EndAsync(HttpContext.ParticipantId(), id, HttpContext.Client(), ct);
         return NoContent();
     }
 

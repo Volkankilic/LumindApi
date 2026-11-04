@@ -51,7 +51,10 @@ public static class TestDatabase
     }
 
     public static AppDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(ConnectionString).Options);
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(ConnectionString)
+            .AddInterceptors(TestEncryption.Shared) // the same interceptor as the application, with the TEST key
+            .Options);
 
     private static string? ComputeSkipReason()
     {

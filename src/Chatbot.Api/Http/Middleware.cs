@@ -24,6 +24,11 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
         {
             await Problems.WriteAsync(context, ex);
         }
+        catch (Microsoft.AspNetCore.Http.BadHttpRequestException) when (!context.Response.HasStarted)
+        {
+            // An unreadable or oversized body (Kestrel's limit): the same answer as any other invalid input.
+            await Problems.WriteAsync(context, StatusCodes.Status422UnprocessableEntity, ProblemCodes.ValidationFailed);
+        }
         catch (Exception ex)
         {
             logger.LogError("Unhandled exception of type {ExceptionType}", ex.GetType().FullName);
@@ -58,5 +63,41 @@ public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<Reque
                 context.Response.StatusCode,
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
+    }
+}
+
+/// <summary>Request size limits (bytes). Messages are at most Chat:MaxMessageLength characters, so a body this large is never legitimate.</summary>
+public static class ApiLimits
+{
+    public const int MaxRequestBodyBytes = 64 * 1024;
+}
+
+/// <summary>
+/// Headers every API answer carries, independent of whatever proxy sits in front: nothing personal is cached (`no-store`),
+/// no content sniffing, no referrer. Also refuses an oversized body BEFORE reading it (the same 422 as any invalid input).
+/// </summary>
+public sealed class ApiHardeningMiddleware(RequestDelegate next)
+{
+    public Task InvokeAsync(HttpContext context)
+    {
+        context.Response.OnStarting(static state =>
+        {
+            var headers = ((HttpContext)state).Response.Headers;
+            if (!headers.ContainsKey("Cache-Control"))
+            {
+                headers.CacheControl = "no-store";
+            }
+
+            headers["X-Content-Type-Options"] = "nosniff";
+            headers["Referrer-Policy"] = "no-referrer";
+            return Task.CompletedTask;
+        }, context);
+
+        if (context.Request.ContentLength is { } length && length > ApiLimits.MaxRequestBodyBytes)
+        {
+            return Problems.WriteAsync(context, StatusCodes.Status422UnprocessableEntity, ProblemCodes.ValidationFailed);
+        }
+
+        return next(context);
     }
 }

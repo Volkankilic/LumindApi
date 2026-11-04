@@ -19,7 +19,7 @@ Clean Architecture: `Chatbot.Api` (ASP.NET Core, controller tabanlı) · `Chatbo
 dotnet build                                   # uyarılar hata sayılır
 dotnet test                                    # birim + HTTP testleri + gerçek veritabanı testleri (aşağıya bakın)
 dotnet run --project src/Chatbot.Api           # http://localhost:5080 (PORT ortam değişkeni varsa o port)
-dotnet run --project src/Chatbot.Api -- generate-seed   # api/db/local/seed.sql (yalnızca Development, veritabanına bağlanmaz)
+dotnet run --project src/Chatbot.Api -- generate-seed   # api/db/local/seed.sql + 5 YENİ düz kod terminale (yalnızca Development, veritabanına bağlanmaz; şifreleme anahtarı gerekir)
 ```
 
 ### Testler
@@ -27,6 +27,7 @@ dotnet run --project src/Chatbot.Api -- generate-seed   # api/db/local/seed.sql 
 - `Unit/`, `Http/`: veritabanı gerektirmez (sahte servisler, `WebApplicationFactory`).
 - `Integration/`: **gerçek (paylaşılan) Railway veritabanında** çalışır. Bağlantı `ConnectionStrings:Default` (user-secrets ya da ortam değişkeni) ile bulunur; bağlantı yoksa ya da şema sürümü beklenenden düşükse bu testler `[PostgresFact]` ile **atlanır** (atlama nedeni bağlantı bilgisi içermez). Atlanan test sayısına bakın: `Atlanan: 0` olmalı.
   - `AuthIntegrationTests`, `OnboardingAndChatIntegrationTests`, `HealthAndLogIntegrationTests`: kod girişi, refresh rotasyonu, rıza, silme, SSE akışı, idempotency, kriz akışı, günlük sızıntı denetimi.
+  - `EncryptionIntegrationTests`, `AuditIntegrationTests`, `RetentionIntegrationTests` (Faz 4): ham SQL'de düz metin olmaması, şifresiz satırın hata olması, denetim satırlarının değiştirilememesi, saklama işinin (kuru koşu, parti, kilit) yalnızca `itest-` kapsamında çalışması.
   - `SchemaDriftTests`: EF modeli ile veritabanını karşılaştırır (tablo, kolon tipi, null'luluk, PK/FK/CHECK adları, ON DELETE, indeks adı/tekilliği/kolonları/kısmi filtresi). Fark varsa neyin eksik olduğunu yazar; çözüm **yeni numaralı bir betik** (`002_*.sql`) ve `verify.sql` güncellemesidir.
 - **`REQUIRE_DB_TESTS=1`** (CI, raporlar): veritabanına ulaşılamazsa/şema uygulanmamışsa `Integration/` testleri atlanmaz, **nedenini yazarak başarısız olur**; ortam değişkeni yoksa atlanırlar. Rapor için `$env:REQUIRE_DB_TESTS=1; dotnet test` çalıştırılır ve çıktıda `Atlanan: 0` aranır.
 - Testler yalnızca kendi `itest-<guid>` katılımcılarını oluşturur, sonunda FK sırasıyla (rıza, denetim, token, görüşme, katılımcı) siler ve **tohum katılımcılarına dokunmaz**. Test ortamı sahte sırlar kullanır; gerçek pepper'a ihtiyaç yoktur. Başarısız kod denemeleri katılımcıya bağlanamayan **anonim denetim satırları** bırakır (kasıtlı: bir katılımcıya ait olmadığı için güvenle ayırt edilip silinemez).
@@ -42,6 +43,17 @@ dotnet user-secrets set "Auth:JwtSigningKey" "<RASTGELE-EN-AZ-32-BAYT>" --projec
 dotnet user-secrets set "Auth:CodePepper"    "<RASTGELE-EN-AZ-32-BAYT>" --project src/Chatbot.Api
 dotnet user-secrets set "Privacy:IpHashKey"  "<RASTGELE-EN-AZ-32-BAYT>" --project src/Chatbot.Api
 ```
+
+**Veri şifreleme anahtarı (Faz 4, zorunlu, Development dahil):** sohbet içeriği ve rumuz veritabanına AES-256-GCM ile şifreli yazılır (ADR 007). Anahtar tam **32 bayt, base64**, `<id>` harf/rakam/`-`/`_`. Üretme komutu çıktıyı **yalnızca panoya** yazar; ekrana ya da sohbete yazdırmayın:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)) | Set-Clipboard
+cd api
+dotnet user-secrets set "Privacy:DataEncryptionKeys:k1" "<PANODAKİ-DEĞER>" --project src/Chatbot.Api
+dotnet user-secrets set "Privacy:CurrentDataEncryptionKeyId" "k1" --project src/Chatbot.Api
+```
+
+Anahtar yoksa ya da 32 bayt değilse uygulama **başlamaz** (mesaj yalnızca ayar adını söyler, değeri değil). Aynı değer Railway'de `Privacy__DataEncryptionKeys__k1` ve `Privacy__CurrentDataEncryptionKeyId` olarak girilir; **iki yerde birebir aynı olmalıdır**. **Anahtar kaybı veri kaybıdır:** bir şifre yöneticisine de kaydedin. Testler kendi sabit **test anahtarıyla** çalışır (gerçek anahtarı kullanmaz).
 
 `Auth:CodePepper` Railway'deki API ile **aynı** olmalıdır (kod hash'leri pepper'a bağlıdır). Ayrıntılar kök [README.md](../README.md) içindeki "Railway'e yayınlama" bölümündedir. Geliştirme ayarları (`Auth:CookieSecure=false`, `Cors:AllowedOrigins`) için `appsettings.Development.example.json` dosyasını `appsettings.Development.json` olarak kopyalayın; bu dosya git'e eklenmez.
 

@@ -71,12 +71,14 @@ public class AuthController(IAuthService auth, AuthOptions options) : Controller
             IsEssential = true, // strictly necessary cookie
         });
 
+    internal static CookieOptions RefreshCookieDeleteOptions(AuthOptions options) => new()
+    {
+        HttpOnly = true,
+        Secure = options.CookieSecure,
+        SameSite = SameSiteMode.Strict,
+        Path = CookiePath,
+    };
+
     private void DeleteRefreshCookie() =>
-        Response.Cookies.Delete(RefreshCookie, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = options.CookieSecure,
-            SameSite = SameSiteMode.Strict,
-            Path = CookiePath,
-        });
+        Response.Cookies.Delete(RefreshCookie, RefreshCookieDeleteOptions(options));
 }

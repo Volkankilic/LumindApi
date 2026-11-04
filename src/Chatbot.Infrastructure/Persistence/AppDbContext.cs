@@ -107,6 +107,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.ActorType).HasConversion<string>();
             // No foreign key on actor_id: audit entries must outlive a deleted participant.
             e.HasIndex(x => new { x.ActorId, x.Timestamp }).HasDatabaseName("ix_audit_logs_actor_time");
+            // 002_retention_indexes.sql: the retention job deletes audit rows by age.
+            e.HasIndex(x => x.Timestamp).HasDatabaseName("ix_audit_logs_timestamp");
+            e.HasIndex(x => x.Timestamp).HasFilter("actor_type = 'Anonymous'").HasDatabaseName("ix_audit_logs_anonymous_timestamp");
         });
 
         ApplySnakeCase(b);

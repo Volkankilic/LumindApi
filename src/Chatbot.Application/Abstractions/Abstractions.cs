@@ -17,6 +17,25 @@ public interface ISecretHasher
     string? HashIp(string? ip);
 }
 
+/// <summary>
+/// Field level encryption (AES-256-GCM) of message content and nickname. The additional data binds a value to its
+/// table, column and row, so a ciphertext cannot be moved to another row. See ADR 007.
+/// </summary>
+public interface IFieldProtector
+{
+    string Protect(string table, string column, Guid rowId, string plaintext);
+
+    /// <exception cref="FieldProtectionException">Not encrypted (legacy plain text), tampered with, moved to another row, or the key is unknown.</exception>
+    string Unprotect(string table, string column, Guid rowId, string stored);
+}
+
+/// <summary>Never carries content: only the table, column and row id.</summary>
+public class FieldProtectionException(string message) : Exception(message);
+
+/// <summary>A stored value that is not in the encrypted format (e.g. a row written before encryption existed).</summary>
+public sealed class PlaintextFieldException(string table, string column, Guid rowId)
+    : FieldProtectionException($"Field {table}.{column} of row {rowId} is not encrypted.");
+
 public interface IAuditWriter
 {
     /// <summary>Writes one audit entry. Never pass content (message text, nickname, code, token).</summary>

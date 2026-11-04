@@ -36,6 +36,14 @@ public sealed class AuthOptions
     public int RefreshAttempts { get; set; } = 30;
 
     public int RefreshWindowSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Failed code attempts, across ALL clients, within <see cref="FailureBudgetWindowMinutes"/> that raise a warning and an
+    /// audit row. It NEVER blocks anyone (a lock-out would hurt legitimate participants). 0 = off.
+    /// </summary>
+    public int FailureBudgetThreshold { get; set; } = 120;
+
+    public int FailureBudgetWindowMinutes { get; set; } = 10;
 }
 
 public sealed class DocumentsOptions
@@ -59,6 +67,50 @@ public sealed class PrivacyOptions
 
     /// <summary>Secret. Key for the hash of client IPs in the audit log (separate from the code pepper).</summary>
     public string IpHashKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Secret. Data encryption keys by id (Privacy__DataEncryptionKeys__&lt;id&gt; = base64 of 32 bytes). Several can exist so
+    /// older values stay readable; new values are written with <see cref="CurrentDataEncryptionKeyId"/>. They live
+    /// outside the database (user-secrets / environment) and must be the SAME on every environment sharing the database.
+    /// </summary>
+    public Dictionary<string, string> DataEncryptionKeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The id (in <see cref="DataEncryptionKeys"/>) used for every new write. Letters, digits, '-' and '_' only.</summary>
+    public string CurrentDataEncryptionKeyId { get; set; } = string.Empty;
+
+    /// <summary>Retention periods in days. Empty (null) or 0 = that rule is OFF. The values are decided by the project and the ethics board.</summary>
+    public RetentionDaysOptions RetentionDays { get; set; } = new();
+
+    public RetentionJobOptions Retention { get; set; } = new();
+}
+
+/// <summary>Every rule is off by default (no value). TODO(volkan): the periods are decided with the ethics board.</summary>
+public sealed class RetentionDaysOptions
+{
+    /// <summary>Conversations (and their messages) older than this: counted from the end, or from the last message when never ended.</summary>
+    public int? EndedConversations { get; set; }
+
+    /// <summary>Audit rows of unknown actors (failed code attempts).</summary>
+    public int? AnonymousAudit { get; set; }
+
+    /// <summary>All other audit rows (participant, system and, later, researcher actions).</summary>
+    public int? AuditLogs { get; set; }
+
+    public bool AnyEnabled => EndedConversations is > 0 || AnonymousAudit is > 0 || AuditLogs is > 0;
+}
+
+public sealed class RetentionJobOptions
+{
+    /// <summary>While true the job only logs how many rows it WOULD delete (counts, never content).</summary>
+    public bool DryRun { get; set; } = true;
+
+    /// <summary>Also clean refresh tokens that expired more than a day ago (they hold only a hash). Off by default.</summary>
+    public bool ExpiredRefreshTokens { get; set; }
+
+    public int IntervalHours { get; set; } = 24;
+
+    /// <summary>Rows deleted per statement.</summary>
+    public int BatchSize { get; set; } = 500;
 }
 
 public sealed class ChatOptions
@@ -90,5 +142,5 @@ public sealed class DatabaseOptions
     public const string Section = "Database";
 
     /// <summary>The schema version this build expects (the highest api/db script number).</summary>
-    public int ExpectedSchemaVersion { get; set; } = 1;
+    public int ExpectedSchemaVersion { get; set; } = 2;
 }

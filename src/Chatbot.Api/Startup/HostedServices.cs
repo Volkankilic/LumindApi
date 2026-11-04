@@ -64,3 +64,62 @@ public sealed class SchemaCheckService(IServiceScopeFactory scopes, ILogger<Sche
         }
     }
 }
+
+/// <summary>
+/// Runs the retention job (Chatbot.Infrastructure.Retention.RetentionService) once a day. With no retention period
+/// configured (the default) it does nothing at all. In dry-run mode (the default once a period is set) it only logs counts.
+/// A failure is logged by exception TYPE only and the loop carries on with the next interval.
+/// </summary>
+public sealed class RetentionHostedService(
+    IServiceScopeFactory scopes,
+    PrivacyOptions privacy,
+    ILogger<RetentionHostedService> logger) : BackgroundService
+{
+    private static readonly TimeSpan FirstDelay = TimeSpan.FromMinutes(5);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!privacy.RetentionDays.AnyEnabled && !privacy.Retention.ExpiredRefreshTokens)
+        {
+            logger.LogInformation("Retention job is off (no retention period is configured).");
+            return;
+        }
+
+        logger.LogInformation(
+            "Retention job is on ({Mode}), every {Hours} h.",
+            privacy.Retention.DryRun ? "dry run" : "deleting",
+            privacy.Retention.IntervalHours);
+
+        try
+        {
+            await Task.Delay(FirstDelay, stoppingToken);
+            using var timer = new PeriodicTimer(TimeSpan.FromHours(privacy.Retention.IntervalHours));
+            do
+            {
+                await RunOnceAsync(stoppingToken);
+            }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
+        }
+        catch (OperationCanceledException)
+        {
+            // shutting down
+        }
+    }
+
+    private async Task RunOnceAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<Chatbot.Infrastructure.Retention.RetentionService>().RunAsync(null, null, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("Retention run failed with an exception of type {ExceptionType}", ex.GetType().FullName);
+        }
+    }
+}

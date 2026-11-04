@@ -11,6 +11,7 @@ using Chatbot.Domain.Rules;
 using Chatbot.Infrastructure.Participants;
 using Chatbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Chatbot.Infrastructure.Security;
 
@@ -20,6 +21,8 @@ public sealed class AuthService(
     IAccessTokenIssuer accessTokens,
     IAuditWriter audit,
     AuthOptions options,
+    AuthFailureBudget failureBudget,
+    ILogger<AuthService> logger,
     TimeProvider clock) : IAuthService
 {
     // Compared against when no participant has the code, so a wrong code costs the same work as a right one.
@@ -39,7 +42,17 @@ public sealed class AuthService(
         if (!formatOk || participant is null || !sameHash
             || participant.Status is ParticipantStatus.Revoked or ParticipantStatus.Deleted)
         {
-            await audit.WriteAsync(ActorType.Anonymous, null, "auth.code.failed", null, null, client.Ip, ct);
+            await audit.WriteAsync(ActorType.Anonymous, null, AuditActions.AuthCodeFailed, null, null, client.Ip, ct);
+            if (failureBudget.RecordFailure(clock.GetUtcNow()))
+            {
+                // Only a warning and an audit row: nobody is locked out (see AuthFailureBudget). No IP, no code.
+                logger.LogWarning(
+                    "Failed code attempts across all clients reached {Threshold} within {Minutes} minutes: possible guessing attack.",
+                    options.FailureBudgetThreshold,
+                    options.FailureBudgetWindowMinutes);
+                await audit.WriteAsync(ActorType.System, null, AuditActions.AuthFailureBudgetExceeded, null, null, null, ct);
+            }
+
             throw AppException.InvalidCode();
         }
 
@@ -63,7 +76,7 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
-        await audit.WriteAsync(ActorType.Participant, participant.Id, "auth.code.succeeded", null, null, client.Ip, ct);
+        await audit.WriteAsync(ActorType.Participant, participant.Id, AuditActions.AuthCodeSucceeded, null, null, client.Ip, ct);
         return await ResultAsync(participant, issued, ct);
     }
 
@@ -86,7 +99,7 @@ public sealed class AuthService(
             {
                 // A spent token came back: treat the whole sign-in as compromised.
                 await RevokeFamilyAsync(token.FamilyId, now, ct);
-                await audit.WriteAsync(ActorType.Participant, token.ParticipantId, "auth.refresh.reuse-detected", null, null, client.Ip, ct);
+                await audit.WriteAsync(ActorType.Participant, token.ParticipantId, AuditActions.AuthRefreshReuseDetected, null, null, client.Ip, ct);
             }
 
             throw AppException.Unauthorized();
@@ -134,7 +147,7 @@ public sealed class AuthService(
         }
 
         await RevokeFamilyAsync(token.FamilyId, clock.GetUtcNow(), ct);
-        await audit.WriteAsync(ActorType.Participant, token.ParticipantId, "auth.logout", null, null, client.Ip, ct);
+        await audit.WriteAsync(ActorType.Participant, token.ParticipantId, AuditActions.AuthLogout, null, null, client.Ip, ct);
     }
 
     private IssuedRefreshToken AddRefreshToken(

@@ -86,7 +86,7 @@ public sealed class ParticipantService(
 
         foreach (var record in records)
         {
-            var action = $"consent.{record.Type.ToString().ToLowerInvariant()}.{(record.Granted ? "granted" : "withdrawn")}";
+            var action = AuditActions.Consent(record.Type, record.Granted);
             await audit.WriteAsync(ActorType.Participant, participantId, action, nameof(ConsentRecord), null, client.Ip, ct);
         }
 
@@ -110,7 +110,7 @@ public sealed class ParticipantService(
 
         participant.Nickname = NicknameRules.Clean(nickname!);
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync(ActorType.Participant, participantId, "participant.nickname.set", null, null, client.Ip, ct);
+        await audit.WriteAsync(ActorType.Participant, participantId, AuditActions.ParticipantNicknameSet, null, null, client.Ip, ct);
         return ConsentRules.ComputeState(participant, snapshot);
     }
 
@@ -135,7 +135,7 @@ public sealed class ParticipantService(
         }
 
         await tx.CommitAsync(ct);
-        await audit.WriteAsync(ActorType.Participant, participantId, "participant.deleted", null, null, client.Ip, ct);
+        await audit.WriteAsync(ActorType.Participant, participantId, AuditActions.ParticipantDeleted, null, null, client.Ip, ct);
     }
 
     /// <summary>Deletes conversations (their messages go with them, by foreign key cascade) and the nickname.</summary>

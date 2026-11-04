@@ -13,6 +13,7 @@ using Chatbot.Infrastructure.Chat;
 using Chatbot.Infrastructure.Dev;
 using Chatbot.Infrastructure.Security;
 using Chatbot.Infrastructure.Seed;
+using Chatbot.Tests.TestSupport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -27,6 +28,8 @@ internal static class TestServices
         ["Auth:CodePepper"] = pepper,
         ["Auth:JwtSigningKey"] = new string('j', 40),
         ["Privacy:IpHashKey"] = new string('i', 40),
+        [$"Privacy:DataEncryptionKeys:{TestEncryption.KeyId}"] = TestEncryption.KeyBase64,
+        ["Privacy:CurrentDataEncryptionKeyId"] = TestEncryption.KeyId,
         ["ConnectionStrings:Default"] = "Host=none",
     };
 
@@ -157,7 +160,7 @@ public class OptionsValidatorTests
         bool requireDatabase = true) =>
         OptionsValidator.Validate(
             auth ?? new AuthOptions { JwtSigningKey = new string('j', 40), CodePepper = new string('p', 40) },
-            privacy ?? new PrivacyOptions { IpHashKey = new string('i', 40) },
+            privacy ?? TestEncryption.Privacy(),
             new DocumentsOptions(),
             new ChatOptions(),
             connection,
@@ -326,13 +329,30 @@ public class EnvironmentRulesTests
         try
         {
             using var provider = TestServices.Build(Environments.Development, TestServices.Secrets(pepper));
-            var code = SeedCommand.Run(provider.GetRequiredService<IHostEnvironment>(), provider, ["generate-seed", "--out", path], new StringWriter(), new StringWriter());
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var code = SeedCommand.Run(provider.GetRequiredService<IHostEnvironment>(), provider, ["generate-seed", "--out", path], error, output);
             Assert.Equal(0, code);
 
             var bytes = File.ReadAllBytes(path);
             Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF, "no BOM");
             var sql = Encoding.UTF8.GetString(bytes);
             Assert.DoesNotContain(pepper, sql, StringComparison.Ordinal);
+
+            // The five NEW plain codes are printed to the terminal, and only there.
+            var printed = System.Text.RegularExpressions.Regex.Matches(output.ToString(), @"  (seed-[1-5]): ([A-Z0-9]{8})")
+                .Select(m => m.Groups[2].Value).ToList();
+            Assert.Equal(5, printed.Count);
+            foreach (var plain in printed)
+            {
+                Assert.DoesNotContain(plain, sql, StringComparison.Ordinal);
+            }
+
+            // Nothing else secret is printed: no pepper, no key, no hash.
+            var text = output + error.ToString();
+            Assert.DoesNotContain(pepper, text, StringComparison.Ordinal);
+            Assert.DoesNotContain(TestEncryption.KeyBase64, text, StringComparison.Ordinal);
+            Assert.DoesNotContain("enc:v1:", text, StringComparison.Ordinal);
             foreach (var plain in new[] { "ABCD2345", "BCDF3456", "CDFG4567", "DFGH5678", "FGHJ6789" })
             {
                 Assert.DoesNotContain(plain, sql, StringComparison.Ordinal);
@@ -358,59 +378,96 @@ public class SeedSqlGeneratorTests
 {
     private const string Pepper = "seed-test-pepper-seed-test-pepper-12";
 
-    private static (string Sql, SecretHasher Hasher) Generate()
+    private static (SeedOutput Output, SecretHasher Hasher, AesGcmFieldProtector Protector) Generate()
     {
         var hasher = new SecretHasher(new AuthOptions { CodePepper = Pepper }, new PrivacyOptions { IpHashKey = new string('i', 40) });
-        var sql = new SeedSqlGenerator(hasher, new DocumentsOptions(), TimeProvider.System).Generate();
-        return (sql, hasher);
+        var protector = TestEncryption.Protector();
+        var output = new SeedSqlGenerator(hasher, protector, new DocumentsOptions(), TimeProvider.System).Generate();
+        return (output, hasher, protector);
     }
 
     [Fact]
-    public void ItHoldsTheHashOfEachCode_AndNeverACodeOrThePepper()
+    public void ItHoldsTheHashOfEachNewCode_AndNeverACodeOrThePepper()
     {
-        var (sql, hasher) = Generate();
-        foreach (var code in new[] { "ABCD2345", "BCDF3456", "CDFG4567", "DFGH5678", "FGHJ6789" })
+        var (output, hasher, _) = Generate();
+        Assert.Equal(5, output.Codes.Count);
+        foreach (var seed in output.Codes)
         {
-            Assert.DoesNotContain(code, sql, StringComparison.Ordinal);
-            Assert.Contains(hasher.HashCode(code), sql, StringComparison.Ordinal);
+            Assert.True(ParticipantCode.IsValid(seed.Code), "same format as a real code");
+            Assert.DoesNotContain(seed.Code, output.Sql, StringComparison.Ordinal);
+            Assert.Contains(hasher.HashCode(seed.Code), output.Sql, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain(Pepper, sql, StringComparison.Ordinal);
+        Assert.DoesNotContain(Pepper, output.Sql, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ItIsOneTransaction_Idempotent_AndWarnsThatTheDataIsSynthetic()
+    public void EveryRun_DrawsNewCodes_AndTheFormerFixedCodesAreGone()
     {
-        var (sql, _) = Generate();
+        var (first, _, _) = Generate();
+        var (second, _, _) = Generate();
+        Assert.NotEqual(first.Codes.Select(c => c.Code), second.Codes.Select(c => c.Code));
+        Assert.Equal(5, first.Codes.Select(c => c.Code).Distinct().Count());
+        foreach (var former in new[] { "ABCD2345", "BCDF3456", "CDFG4567", "DFGH5678", "FGHJ6789" })
+        {
+            Assert.DoesNotContain(former, first.Sql, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void NicknamesAndMessageText_AreEncrypted_NeverPlain()
+    {
+        var (output, _, protector) = Generate();
+        var sql = output.Sql;
+        Assert.DoesNotContain("'Deneme'", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeReplies.Pick("sakinleşmek", 0).Text, sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bugün kendimi çok yorgun", sql, StringComparison.Ordinal);
+        Assert.Contains("'enc:v1:test:", sql, StringComparison.Ordinal);
+
+        // and they are readable with the same key, bound to their row
+        var nickname = System.Text.RegularExpressions.Regex.Match(sql, "'(enc:v1:test:[A-Za-z0-9+/=]+)'").Groups[1].Value;
+        Assert.StartsWith("enc:v1:test:", nickname, StringComparison.Ordinal);
+        Assert.Contains(sql.Split('\n'), l => l.Contains("'seed-2'", StringComparison.Ordinal) && l.Contains("enc:v1:test:", StringComparison.Ordinal));
+        _ = protector;
+    }
+
+    [Fact]
+    public void ItIsOneTransaction_AndWarnsThatTheDataIsSynthetic()
+    {
+        var (output, _, _) = Generate();
+        var sql = output.Sql;
         Assert.Contains("BEGIN;", sql, StringComparison.Ordinal);
         Assert.Contains("COMMIT;", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT DO NOTHING", sql, StringComparison.Ordinal);
+        Assert.Contains("DO UPDATE SET code_hash = EXCLUDED.code_hash, nickname = EXCLUDED.nickname", sql, StringComparison.Ordinal);
         Assert.Contains("SYNTHETIC DATA ONLY", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE ", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("DROP ", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("TRUNCATE", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("ALTER ", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DELETE ", sql, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ThereAreFiveParticipants_WithTheMockStates()
     {
-        var (sql, _) = Generate();
+        var (output, _, _) = Generate();
         foreach (var label in new[] { "'seed-1'", "'seed-2'", "'seed-3'", "'seed-4'", "'seed-5'" })
         {
-            Assert.Contains(label, sql, StringComparison.Ordinal);
+            Assert.Contains(label, output.Sql, StringComparison.Ordinal);
         }
 
-        Assert.Contains("'Invited'", sql, StringComparison.Ordinal);
-        Assert.Contains("'Revoked'", sql, StringComparison.Ordinal);
-        Assert.Contains("'0.0-eski'", sql, StringComparison.Ordinal); // the old versions
-        Assert.Contains("'Deneme'", sql, StringComparison.Ordinal); // nickname
+        Assert.Equal(["seed-1", "seed-2", "seed-3", "seed-4", "seed-5"], output.Codes.Select(c => c.Label));
+        Assert.Contains("'Invited'", output.Sql, StringComparison.Ordinal);
+        Assert.Contains("'Revoked'", output.Sql, StringComparison.Ordinal);
+        Assert.Contains("'0.0-eski'", output.Sql, StringComparison.Ordinal); // the old versions
     }
 
     [Fact]
     public void TheFullParticipant_HasTwoFinishedConversations_AndNoActiveOne()
     {
-        var (sql, _) = Generate();
+        var (output, _, _) = Generate();
+        var sql = output.Sql;
         var conversations = sql[sql.IndexOf("INSERT INTO public.conversations", StringComparison.Ordinal)..];
         conversations = conversations[..conversations.IndexOf("ON CONFLICT", StringComparison.Ordinal)];
         Assert.Equal(2, conversations.Split('\n').Count(l => l.TrimStart().StartsWith("('", StringComparison.Ordinal)));
@@ -420,17 +477,10 @@ public class SeedSqlGeneratorTests
     [Fact]
     public void ReRunning_KeepsTheSameIds()
     {
-        var (first, _) = Generate();
-        var (second, _) = Generate();
+        var (first, _, _) = Generate();
+        var (second, _, _) = Generate();
         string Ids(string s) => string.Join("|", System.Text.RegularExpressions.Regex.Matches(s, "\\('[0-9a-f-]{36}'").Select(m => m.Value));
-        Assert.Equal(Ids(first), Ids(second));
-    }
-
-    [Fact]
-    public void TheRepliesAreTheSharedCannedTexts_NotNewOnes()
-    {
-        var (sql, _) = Generate();
-        Assert.Contains(FakeReplies.Pick("sakinleşmek", 0).Text, sql, StringComparison.Ordinal);
+        Assert.Equal(Ids(first.Sql), Ids(second.Sql));
     }
 }
 
