@@ -14,6 +14,7 @@ Tek bir Railway PostgreSQL veritabanı vardır (`railway`): yerel geliştirme, o
 | `verify.sql` | **Salt-okunur** kontrol. Beklenen tablo/kolon/kısıt/indeks ve sürüm kaydı. Tek bir sonuç tablosu döner, son satır `SUMMARY`. | Her betikten sonra |
 | `local/seed.sql` | 5 sentetik tohum katılımcı (yalnızca kod **hash**'leri). `generate-seed` ile üretilir, `.gitignore`'dadır. Idempotent. | İsteğe bağlı, `verify.sql` yeşilse |
 | `cleanup-test-data.sql` | Çöken entegrasyon testlerinden kalan `itest-` etiketli satırları siler. Yalnızca bu önekle çalışır. | Gerektiğinde |
+| `reset-seed-data.sql` | Yalnızca `seed-` etiketli katılımcıları ve bağlı satırlarını siler (veri, DDL değil). Yayın duman testinden (`docs/yayin-duman-testi.md`) sonra, ardından `local/seed.sql` yeniden çalıştırılır. | Elle duman testinden sonra |
 | `rollback/001_initial_down.sql` | **YIKICI.** Tüm tabloları ve verilerini siler. | Sıfırdan başlamak istediğinizde |
 
 ## Çalıştırma sırası (ilk kurulum)
