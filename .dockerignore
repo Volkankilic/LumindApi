@@ -1,0 +1,27 @@
+# Build context for Railway's Dockerfile build (see Dockerfile). Keeps secrets, local artefacts and tests out of it.
+**/bin/
+**/obj/
+.vs/
+**/*.user
+**/*.suo
+
+# Secrets and local-only files (never part of an image)
+**/appsettings.Development.json
+**/appsettings.*.local.json
+.env
+.env.*
+**/secrets/
+db/local/
+**/local/
+
+# Not needed at run time
+tests/
+db/
+**/*.md
+.git
+.gitignore
+.gitattributes
+.editorconfig
+Dockerfile
+.dockerignore
+dotnet-tools.json
