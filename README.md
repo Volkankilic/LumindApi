@@ -28,6 +28,7 @@ dotnet run --project src/Chatbot.Api -- generate-seed   # api/db/local/seed.sql 
 - `Integration/`: **gerçek (paylaşılan) Railway veritabanında** çalışır. Bağlantı `ConnectionStrings:Default` (user-secrets ya da ortam değişkeni) ile bulunur; bağlantı yoksa ya da şema sürümü beklenenden düşükse bu testler `[PostgresFact]` ile **atlanır** (atlama nedeni bağlantı bilgisi içermez). Atlanan test sayısına bakın: `Atlanan: 0` olmalı.
   - `AuthIntegrationTests`, `OnboardingAndChatIntegrationTests`, `HealthAndLogIntegrationTests`: kod girişi, refresh rotasyonu, rıza, silme, SSE akışı, idempotency, kriz akışı, günlük sızıntı denetimi.
   - `SchemaDriftTests`: EF modeli ile veritabanını karşılaştırır (tablo, kolon tipi, null'luluk, PK/FK/CHECK adları, ON DELETE, indeks adı/tekilliği/kolonları/kısmi filtresi). Fark varsa neyin eksik olduğunu yazar; çözüm **yeni numaralı bir betik** (`002_*.sql`) ve `verify.sql` güncellemesidir.
+- **`REQUIRE_DB_TESTS=1`** (CI, raporlar): veritabanına ulaşılamazsa/şema uygulanmamışsa `Integration/` testleri atlanmaz, **nedenini yazarak başarısız olur**; ortam değişkeni yoksa atlanırlar. Rapor için `$env:REQUIRE_DB_TESTS=1; dotnet test` çalıştırılır ve çıktıda `Atlanan: 0` aranır.
 - Testler yalnızca kendi `itest-<guid>` katılımcılarını oluşturur, sonunda FK sırasıyla (rıza, denetim, token, görüşme, katılımcı) siler ve **tohum katılımcılarına dokunmaz**. Test ortamı sahte sırlar kullanır; gerçek pepper'a ihtiyaç yoktur. Başarısız kod denemeleri katılımcıya bağlanamayan **anonim denetim satırları** bırakır (kasıtlı: bir katılımcıya ait olmadığı için güvenle ayırt edilip silinemez).
 
 ## Gizli değerler (user-secrets)
@@ -65,6 +66,25 @@ JSON camelCase, enum'lar camelCase string. Hatalar RFC 7807 ProblemDetails + `co
 | `GET /api/health` | açık | `ok` / `not-ready` |
 
 OpenAPI belgesi **yalnızca Development'ta** `GET /openapi/v1.json` adresindedir.
+
+### Yalnızca Development: uçtan uca test katılımcıları
+
+| Uç nokta | Açıklama |
+|---|---|
+| `POST /api/dev/test-participants` | `{ "state": "new" \| "ready" \| "withdrawn" \| "revoked" \| "outdated" }` → `201 { participantId, code }`. Etiket `itest-e2e-<guid>`; kod rastgele, yalnızca bu yanıtta döner. |
+| `DELETE /api/dev/test-participants/{id}` | Katılımcıyı ve bağlı tüm satırlarını (rıza, denetim, token, görüşme, mesaj) siler. `itest-` etiketi olmayanı (tohum dahil) `403 forbidden` ile reddeder, olmayanı `404`. |
+
+`ready`: aydınlatma + rıza + rumuz "Deneme". `withdrawn`: rıza geri alınmış. `revoked`: iptal. `outdated`: eski belge sürümü (`0.0-eski`). Bu uç noktaların servisi Development dışında **DI'a kaydedilmez** ve route'lar yoktur (404); OpenAPI belgesinde görünmezler.
+
+### Hız sınırları (yapılandırılabilir, gizli değil)
+
+| Ayar (ortam değişkeni) | Varsayılan |
+|---|---|
+| `Auth:CodeAttempts` / `Auth:CodeWindowSeconds` (`Auth__CodeAttempts` …) | 5 / 30 sn, IP başına |
+| `Auth:RefreshAttempts` / `Auth:RefreshWindowSeconds` | 30 / 60 sn, IP başına |
+| `Chat:MessagesPerMinute` | 20, katılımcı başına |
+
+Uçtan uca testler aynı IP'den çok sayıda giriş yaptığı için API bu sınırlar yükseltilerek başlatılır (örn. `Auth__CodeAttempts=1000`); hız sınırı senaryosu varsayılanlarla ayrı bir koşuda çalışır (bkz. client/README).
 
 ## Şema yönetimi
 

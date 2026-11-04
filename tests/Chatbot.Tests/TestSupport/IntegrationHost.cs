@@ -43,7 +43,7 @@ public sealed class IntegrationHost : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        if (TestDatabase.Skip is not null)
+        if (!TestDatabase.EnsureAvailable())
         {
             return Task.CompletedTask; // the tests are skipped; nothing to host
         }
@@ -95,7 +95,7 @@ public sealed class IntegrationHost : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (TestDatabase.Skip is not null)
+        if (Factory is null)
         {
             return;
         }

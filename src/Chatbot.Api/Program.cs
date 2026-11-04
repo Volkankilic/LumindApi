@@ -38,7 +38,7 @@ builder.Host.UseSerilog(
 },
     preserveStaticLogger: true);
 
-builder.Services.AddInfrastructure().AddApiServices();
+builder.Services.AddInfrastructure(builder.Environment).AddApiServices();
 
 var app = builder.Build();
 
@@ -74,6 +74,7 @@ app.MapControllers();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.MapDevEndpoints(); // test participants for the end-to-end tests; absent (404) in every other environment
 }
 
 app.Run();

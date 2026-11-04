@@ -105,12 +105,15 @@ public static class ApiServices
             });
 
             limiter.AddPolicy(AuthRefreshLimiter, http =>
-                RateLimitPartition.GetFixedWindowLimiter(ClientKey(http), _ => new FixedWindowRateLimiterOptions
+            {
+                var auth = http.RequestServices.GetRequiredService<AuthOptions>();
+                return RateLimitPartition.GetFixedWindowLimiter(ClientKey(http), _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 30,
-                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = auth.RefreshAttempts,
+                    Window = TimeSpan.FromSeconds(auth.RefreshWindowSeconds),
                     QueueLimit = 0,
-                }));
+                });
+            });
 
             // Sending messages: per participant.
             limiter.AddPolicy(SendMessageLimiter, http =>

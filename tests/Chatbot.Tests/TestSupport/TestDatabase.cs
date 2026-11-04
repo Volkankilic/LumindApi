@@ -25,8 +25,30 @@ public static class TestDatabase
     public static string ConnectionString =>
         Connection.Value ?? throw new InvalidOperationException("No ConnectionStrings:Default (user-secrets or environment).");
 
-    /// <summary>Null when the database is reachable and the schema is at the expected version; otherwise why the tests are skipped.</summary>
-    public static string? Skip => SkipReason.Value;
+    /// <summary>With REQUIRE_DB_TESTS=1 (CI, reports) an unreachable database FAILS the tests instead of skipping them.</summary>
+    public static bool Required => Environment.GetEnvironmentVariable("REQUIRE_DB_TESTS") == "1";
+
+    /// <summary>Why the database cannot be used (null when it is reachable and the schema is at the expected version).</summary>
+    public static string? Unavailable => SkipReason.Value;
+
+    /// <summary>What the tests skip with: the reason, unless the database is required (then nothing is skipped).</summary>
+    public static string? Skip => Required ? null : Unavailable;
+
+    /// <summary>Call at the start of a database test or fixture: fails loudly when the database is required but unusable.</summary>
+    public static bool EnsureAvailable()
+    {
+        if (Unavailable is null)
+        {
+            return true;
+        }
+
+        if (Required)
+        {
+            throw new InvalidOperationException($"REQUIRE_DB_TESTS=1 but the database cannot be used: {Unavailable}");
+        }
+
+        return false;
+    }
 
     public static AppDbContext NewContext() =>
         new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(ConnectionString).Options);

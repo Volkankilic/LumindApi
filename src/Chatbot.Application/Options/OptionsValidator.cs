@@ -50,9 +50,9 @@ public static class OptionsValidator
                 problems.Add("Auth:RefreshTokenDays must be at least 1 and not above Auth:RefreshTokenMaxDays.");
             }
 
-            if (auth.CodeAttempts < 1 || auth.CodeWindowSeconds < 1)
+            if (auth.CodeAttempts < 1 || auth.CodeWindowSeconds < 1 || auth.RefreshAttempts < 1 || auth.RefreshWindowSeconds < 1)
             {
-                problems.Add("Auth:CodeAttempts and Auth:CodeWindowSeconds must be positive.");
+                problems.Add("Auth:CodeAttempts, Auth:CodeWindowSeconds, Auth:RefreshAttempts and Auth:RefreshWindowSeconds must be positive.");
             }
 
             if (string.IsNullOrWhiteSpace(documents.PrivacyNoticeVersion) || string.IsNullOrWhiteSpace(documents.ConsentVersion))

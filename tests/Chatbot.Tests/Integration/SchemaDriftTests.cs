@@ -20,6 +20,7 @@ public partial class SchemaDriftTests
     [PostgresFact]
     public async Task TheEfModel_MatchesTheDatabaseSchema()
     {
+        TestDatabase.EnsureAvailable();
         await using var db = TestDatabase.NewContext();
         var model = db.GetService<IDesignTimeModel>().Model;
         var problems = new List<string>();
@@ -196,6 +197,7 @@ public partial class SchemaDriftTests
     [PostgresFact]
     public async Task TheSchemaVersionTable_HoldsTheVersionTheApplicationExpects()
     {
+        TestDatabase.EnsureAvailable();
         await using var connection = new NpgsqlConnection(TestDatabase.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("SELECT max(version) FROM public.app_schema_version", connection);

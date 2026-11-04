@@ -31,6 +31,11 @@ public sealed class AuthOptions
     public int CodeAttempts { get; set; } = 5;
 
     public int CodeWindowSeconds { get; set; } = 30;
+
+    /// <summary>Refresh calls per client IP within <see cref="RefreshWindowSeconds"/>.</summary>
+    public int RefreshAttempts { get; set; } = 30;
+
+    public int RefreshWindowSeconds { get; set; } = 60;
 }
 
 public sealed class DocumentsOptions

@@ -22,8 +22,15 @@ public static class DependencyInjection
     /// Everything is resolved lazily from IConfiguration / IHostEnvironment at runtime (not while registering), so the
     /// environment and configuration of a test host apply too. Secrets come only from user-secrets / environment variables.
     /// </summary>
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IHostEnvironment? environment = null)
     {
+        // The test participant service (it deletes consent and audit rows) exists in Development ONLY: in any other
+        // environment it is not even registered.
+        if (environment?.IsDevelopment() == true)
+        {
+            services.AddScoped<DevTestParticipantService>();
+        }
+
         services.AddSingleton(TimeProvider.System);
 
         services.AddSingleton(sp => Bind<AuthOptions>(sp, AuthOptions.Section));
