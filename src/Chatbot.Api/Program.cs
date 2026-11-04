@@ -12,7 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT");
 if (!string.IsNullOrWhiteSpace(port))
 {
-    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+    // [::] is dual-stack (IPv6 and IPv4): Railway's private network is IPv6 only in older environments and dual-stack in newer ones.
+    builder.WebHost.UseUrls($"http://[::]:{port}");
 }
 else if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
 {

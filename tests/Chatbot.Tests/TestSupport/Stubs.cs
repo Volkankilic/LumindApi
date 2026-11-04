@@ -35,7 +35,18 @@ public sealed class StubAuthService : IAuthService
 
     public List<string?> LoggedOut { get; } = [];
 
-    public Task<AuthResult> SignInAsync(string? code, ClientInfo client, CancellationToken ct) => Task.FromResult(SignIn(code));
+    /// <summary>The client address each sign-in call saw (after forwarded-header handling).</summary>
+    public List<string?> ClientIps { get; } = [];
+
+    public Task<AuthResult> SignInAsync(string? code, ClientInfo client, CancellationToken ct)
+    {
+        lock (ClientIps)
+        {
+            ClientIps.Add(client.Ip);
+        }
+
+        return Task.FromResult(SignIn(code));
+    }
 
     public Task<AuthResult> RefreshAsync(string? refreshToken, ClientInfo client, CancellationToken ct) => Task.FromResult(Refresh(refreshToken));
 

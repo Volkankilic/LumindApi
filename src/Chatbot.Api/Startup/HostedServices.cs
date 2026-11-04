@@ -12,7 +12,8 @@ public sealed class ConfigurationValidationService(
     AuthOptions auth,
     PrivacyOptions privacy,
     DocumentsOptions documents,
-    ChatOptions chat) : IHostedService
+    ChatOptions chat,
+    IHostEnvironment environment) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -23,7 +24,8 @@ public sealed class ConfigurationValidationService(
             chat,
             configuration.GetConnectionString("Default"),
             configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [],
-            requireDatabase: true);
+            requireDatabase: true,
+            production: environment.IsProduction());
         if (problems.Count > 0)
         {
             throw new InvalidOperationException("Invalid configuration: " + string.Join(" ", problems));

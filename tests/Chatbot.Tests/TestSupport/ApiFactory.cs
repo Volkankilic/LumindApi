@@ -1,6 +1,7 @@
 using Chatbot.Application.Abstractions;
 using Chatbot.Application.Chat;
 using Chatbot.Application.Conversations;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +10,28 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog.Core;
 
 namespace Chatbot.Tests.TestSupport;
+
+/// <summary>
+/// TestServer has no real peer address. A test sets one with the X-Test-Peer header; it is applied BEFORE the
+/// application's own pipeline, exactly like the socket address of a real connection would be.
+/// </summary>
+internal sealed class TestPeerStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, nextMiddleware) =>
+        {
+            if (context.Request.Headers.TryGetValue("X-Test-Peer", out var peer)
+                && System.Net.IPAddress.TryParse(peer.ToString(), out var address))
+            {
+                context.Connection.RemoteIpAddress = address;
+            }
+
+            await nextMiddleware();
+        });
+        next(app);
+    };
+}
 
 /// <summary>
 /// Hosts the real API pipeline with in-memory settings and (by default) stubbed services behind it: no database,
@@ -69,6 +92,7 @@ public sealed class ApiFactory(
         builder.ConfigureServices(services =>
         {
             services.AddSingleton<ILogEventSink>(Logs);
+            services.AddSingleton<IStartupFilter, TestPeerStartupFilter>();
             if (!stubServices)
             {
                 configure?.Invoke(services);

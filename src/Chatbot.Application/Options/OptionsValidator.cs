@@ -16,7 +16,8 @@ public static class OptionsValidator
         ChatOptions chat,
         string? connectionString,
         IEnumerable<string> corsOrigins,
-        bool requireDatabase)
+        bool requireDatabase,
+        bool production = false)
     {
         var problems = new List<string>();
 
@@ -63,6 +64,12 @@ public static class OptionsValidator
             if (chat.ContextMessages < 1 || chat.MaxMessageLength < 1 || chat.MessagesPerMinute < 1)
             {
                 problems.Add("Chat:ContextMessages, Chat:MaxMessageLength and Chat:MessagesPerMinute must be positive.");
+            }
+
+            if (production && !auth.CookieSecure)
+            {
+                // The refresh cookie must never travel over plain http in a deployed environment.
+                problems.Add("Auth:CookieSecure must be true in Production.");
             }
 
             if (corsOrigins.Any(o => o.Contains('*', StringComparison.Ordinal)))
