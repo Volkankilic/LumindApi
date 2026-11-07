@@ -8,6 +8,7 @@ using Chatbot.Infrastructure.Admin;
 using Chatbot.Tests.TestSupport;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Chatbot.Tests.Integration;
 
@@ -40,13 +41,13 @@ internal static class AdminHttp
         return (await response.ReadJsonAsync()).GetProperty("mfaToken").GetString()!;
     }
 
-    /// <summary>The newest allowed code: the step AFTER the one used last, so several sign-ins of one test can follow each other.</summary>
+    /// <summary>The current step, or the step AFTER the one used last (at most one step ahead): two sign-ins of one test can follow each other, a third needs a recovery code.</summary>
     public static async Task<string> NextTotpAsync(TestAdmin admin)
     {
         await using var db = TestDatabase.NewContext();
         var last = (await db.AdminUsers.AsNoTracking().SingleAsync(a => a.Id == admin.Id)).TotpLastStep;
         var now = Totp.StepOf(DateTimeOffset.UtcNow);
-        var step = Math.Max(now - Totp.Window, last + 1);
+        var step = Math.Max(now, last + 1); // the CURRENT step first: if the 30 s boundary passes while the request is on its way, it is still inside the window
         Assert.True(step <= now + Totp.Window, "no TOTP step is left for this test admin right now: use a recovery code");
         return Totp.Compute(admin.Secret, step);
     }
@@ -198,7 +199,9 @@ public class AdminAuthIntegrationTests(IntegrationHost host) : IClassFixture<Int
         Assert.Equal(HttpStatusCode.TooManyRequests, lockedReal.StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, lockedUnknown.StatusCode);
         Assert.True(lockedReal.Headers.Contains("Retry-After") && lockedUnknown.Headers.Contains("Retry-After"));
-        Assert.Equal(await lockedReal.Content.ReadAsStringAsync(), await lockedUnknown.Content.ReadAsStringAsync());
+        // Same answer for a real and an unknown name (the seconds left differ by a rounding step between the two requests).
+        static string Normalised(string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"retryAfterSeconds\":\\d+", "\"retryAfterSeconds\":N");
+        Assert.Equal(Normalised(await lockedReal.Content.ReadAsStringAsync()), Normalised(await lockedUnknown.Content.ReadAsStringAsync()));
 
         var audit = await AdminHttp.AuditAsync(admin.Id);
         Assert.Contains(audit, r => (string)r[0]! == AuditActions.AdminAccountLocked);
@@ -321,6 +324,39 @@ public class AdminAuthIntegrationTests(IntegrationHost host) : IClassFixture<Int
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await factory.AdminRefreshAsync(session.Cookie)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await session.Client.GetAsync("/api/admin/me")).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task AConfirmedTotpReset_KillsTheOldSessionTheOldSecretAndTheOldRecoveryCodes_AndTheNewSecretSignsIn()
+    {
+        using var factory = host.NewFactory();
+        var admin = await host.CreateAdminAsync();
+        var session = await factory.SignInAsync(admin);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var accounts = scope.ServiceProvider.GetRequiredService<AdminAccountService>();
+            var (problem, pending) = await accounts.PrepareTotpResetAsync(admin.Username, default);
+            Assert.Equal(AdminAccountProblem.None, problem);
+            var code = Totp.Compute(Base32.Decode(pending!.SecretBase32)!, Totp.StepOf(DateTimeOffset.UtcNow));
+            Assert.Equal(AdminAccountProblem.None, await accounts.ConfirmTotpResetAsync(pending, code, default));
+
+            // the old session is closed at once
+            Assert.Equal(HttpStatusCode.Unauthorized, (await session.Client.GetAsync("/api/admin/me")).StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await factory.AdminRefreshAsync(session.Cookie)).StatusCode);
+
+            // the old recovery codes and the old secret no longer sign in
+            var oldRecovery = await factory.Plain().PostAsync("/api/admin/auth/totp", AdminHttp.Json(new { mfaToken = await factory.MfaTokenAsync(admin), recoveryCode = RecoveryCodes.Display(admin.RecoveryCodes[4]) }));
+            Assert.Equal(HttpStatusCode.Unauthorized, oldRecovery.StatusCode);
+            var oldCode = Totp.Compute(admin.Secret, Totp.StepOf(DateTimeOffset.UtcNow));
+            Assert.Equal(HttpStatusCode.Unauthorized, (await factory.Plain().PostAsync("/api/admin/auth/totp", AdminHttp.Json(new { mfaToken = await factory.MfaTokenAsync(admin), code = oldCode }))).StatusCode);
+
+            // a NEW recovery code signs in (the new secret's own next step would also do, but the confirming step is spent)
+            var fresh = await factory.Plain().PostAsync("/api/admin/auth/totp", AdminHttp.Json(new { mfaToken = await factory.MfaTokenAsync(admin), recoveryCode = pending.RecoveryCodes[0] }));
+            Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+            Assert.Equal(1L, (await RawSql.RowsAsync("SELECT count(*) FROM public.audit_logs WHERE action = @a AND target_id = @t", ("a", AuditActions.AdminTotpReset), ("t", admin.Id))).Single()[0]);
+            Assert.Contains(await AdminHttp.AuditAsync(admin.Id), r => (string)r[0]! == AuditActions.AdminLoginSucceeded);
+        }
     }
 
     [PostgresFact]

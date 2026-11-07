@@ -40,7 +40,7 @@ public class SqlScriptsTests
     [Fact]
     public void EveryIndexOfTheModel_IsCreatedByAScript_AndChecked_ByVerifySql()
     {
-        var scripts = Read("001_initial.sql") + Read("002_retention_indexes.sql") + Read("003_admin.sql");
+        var scripts = Read("001_initial.sql") + Read("002_retention_indexes.sql") + Read("003_admin.sql") + Read("004_crisis_ack_admin_index.sql");
         var verify = Read("verify.sql");
         foreach (var name in ModelIndexNames())
         {

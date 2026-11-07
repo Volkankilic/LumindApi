@@ -604,6 +604,78 @@ public class AdminAccountServiceTests
         Assert.Contains(rig.Audit.Calls, c => c.Action == AuditActions.AdminAccountDisabled);
         Assert.Contains(rig.Audit.Calls, c => c.Action == AuditActions.AdminAccountEnabled);
     }
+
+    [Fact]
+    public async Task ATotpReset_ChangesNothing_UntilTheFirstCodeOfTheNewSecretIsConfirmed()
+    {
+        using var rig = new AdminRig();
+        var admin = await rig.AddAdminAsync();
+        var oldSecret = admin.TotpSecret;
+        rig.Db.AdminRecoveryCodes.Add(new AdminRecoveryCode { Id = Guid.NewGuid(), AdminId = admin.Id, CodeHash = rig.Hasher.HashCode("OLDCODE234") });
+        await rig.Db.SaveChangesAsync();
+
+        var (problem, pending) = await rig.Accounts.PrepareTotpResetAsync("Arastirmaci-1", default);
+
+        Assert.Equal(AdminAccountProblem.None, problem);
+        Assert.Equal(RecoveryCodes.Count, pending!.RecoveryCodes.Count);
+        Assert.NotEqual(oldSecret, pending.SecretBase32);
+        Assert.StartsWith("otpauth://totp/Lumind:arastirmaci-1?secret=", pending.OtpauthUri, StringComparison.Ordinal);
+        Assert.Equal(oldSecret, (await rig.Db.AdminUsers.SingleAsync()).TotpSecret); // nothing was stored by preparing
+        Assert.Single(await rig.Db.AdminRecoveryCodes.ToListAsync());
+
+        Assert.Equal(AdminAccountProblem.WrongCode, await rig.Accounts.ConfirmTotpResetAsync(pending, "000000", default));
+        Assert.Equal(AdminAccountProblem.WrongCode, await rig.Accounts.ConfirmTotpResetAsync(pending, null, default));
+        Assert.Equal(oldSecret, (await rig.Db.AdminUsers.SingleAsync()).TotpSecret);
+        // the old recovery code is still there too:
+        Assert.Contains(await rig.Db.AdminRecoveryCodes.ToListAsync(), c => c.CodeHash == rig.Hasher.HashCode("OLDCODE234"));
+        Assert.DoesNotContain(rig.Audit.Calls, c => c.Action == AuditActions.AdminTotpReset);
+    }
+
+    [Fact]
+    public async Task AConfirmedTotpReset_ReplacesTheSecretAndEveryRecoveryCode_ClosesTheSessions_AndClearsTheLock()
+    {
+        using var rig = new AdminRig();
+        var admin = await rig.AddAdminAsync();
+        admin.FailedAttempts = 6;
+        admin.LockedUntil = rig.Clock.GetUtcNow().AddMinutes(5);
+        var oldHash = rig.Hasher.HashCode("OLDCODE234");
+        rig.Db.AdminRecoveryCodes.Add(new AdminRecoveryCode { Id = Guid.NewGuid(), AdminId = admin.Id, CodeHash = oldHash });
+        rig.Db.AdminRefreshTokens.Add(new AdminRefreshToken { Id = Guid.NewGuid(), AdminId = admin.Id, TokenHash = "t1", FamilyId = Guid.NewGuid(), CreatedAt = rig.Clock.GetUtcNow(), ExpiresAt = rig.Clock.GetUtcNow().AddMinutes(30), FamilyExpiresAt = rig.Clock.GetUtcNow().AddHours(8) });
+        rig.Db.AdminRefreshTokens.Add(new AdminRefreshToken { Id = Guid.NewGuid(), AdminId = admin.Id, TokenHash = "t2", FamilyId = Guid.NewGuid(), CreatedAt = rig.Clock.GetUtcNow(), ExpiresAt = rig.Clock.GetUtcNow().AddMinutes(30), FamilyExpiresAt = rig.Clock.GetUtcNow().AddHours(8) });
+        await rig.Db.SaveChangesAsync();
+        var (_, pending) = await rig.Accounts.PrepareTotpResetAsync("arastirmaci-1", default);
+        var newSecret = Base32.Decode(pending!.SecretBase32)!;
+        var step = Totp.StepOf(rig.Clock.GetUtcNow());
+
+        Assert.Equal(AdminAccountProblem.None, await rig.Accounts.ConfirmTotpResetAsync(pending, Totp.Compute(newSecret, step), default));
+
+        var stored = await rig.Db.AdminUsers.SingleAsync();
+        Assert.Equal(pending.SecretBase32, stored.TotpSecret);
+        Assert.True(stored.TotpEnabled);
+        Assert.Equal(step, stored.TotpLastStep); // the confirming code cannot sign in
+        Assert.Equal((0, null), (stored.FailedAttempts, stored.LockedUntil));
+
+        var codes = await rig.Db.AdminRecoveryCodes.ToListAsync();
+        Assert.Equal(RecoveryCodes.Count, codes.Count);
+        Assert.DoesNotContain(codes, c => c.CodeHash == oldHash); // every OLD recovery code is gone
+        Assert.All(codes, c => Assert.Null(c.UsedAt));
+        foreach (var display in pending.RecoveryCodes)
+        {
+            Assert.Contains(codes, c => c.CodeHash == rig.Hasher.HashCode(RecoveryCodes.Normalize(display)!));
+        }
+
+        Assert.All(await rig.Db.AdminRefreshTokens.ToListAsync(), t => Assert.NotNull(t.RevokedAt)); // every session is closed
+        var call = Assert.Single(rig.Audit.Calls, c => c.Action == AuditActions.AdminTotpReset);
+        Assert.Equal((ActorType.System, admin.Id), (call.Actor, call.TargetId));
+    }
+
+    [Fact]
+    public async Task ATotpReset_OfAnUnknownAdmin_IsNotFound()
+    {
+        using var rig = new AdminRig();
+        Assert.Equal(AdminAccountProblem.NotFound, (await rig.Accounts.PrepareTotpResetAsync("yok-boyle-biri", default)).Problem);
+    }
+
 }
 
 public class AdminCommandTests
@@ -778,6 +850,77 @@ public class AdminCommandTests
         Assert.DoesNotContain("yepyeni-uzun-parola-2", changed.All, StringComparison.Ordinal);
 
         Assert.Equal(1, await Run(services, env, new ScriptedConsole("evet"), "enable-admin", "--username", "yok-boyle-biri"));
+    }
+
+    [Fact]
+    public async Task ResetAdminTotp_AsksTheSameConfirmation_ChangesNothingWithoutIt_AndNeverPrintsTheOldSecret()
+    {
+        var (services, db) = Services();
+        using var _ = services;
+        var admin = new AdminUser { Id = Guid.NewGuid(), Username = "var-olan", PasswordHash = "p", TotpSecret = "JBSWY3DPEHPK3PXP", TotpEnabled = true, Status = AdminStatus.Active, CreatedAt = DateTimeOffset.UtcNow };
+        db.AdminUsers.Add(admin);
+        await db.SaveChangesAsync();
+
+        var production = new ScriptedConsole("evet");
+        Assert.Equal(2, await Run(services, new FakeEnvironment("Production"), production, "reset-admin-totp", "--username", "var-olan"));
+
+        foreach (var answer in new[] { "hayır", "Evet", "" })
+        {
+            var refused = new ScriptedConsole(answer);
+            Assert.Equal(3, await Run(services, new FakeEnvironment("Development"), refused, "reset-admin-totp", "--username", "var-olan"));
+            Assert.Contains(refused.Output, l => l.Contains("veritabani.example.test", StringComparison.Ordinal));
+            Assert.DoesNotContain(refused.Output, l => l.Contains("gizli anahtar", StringComparison.Ordinal)); // no secret before the "evet"
+        }
+
+        Assert.Equal("JBSWY3DPEHPK3PXP", (await db.AdminUsers.SingleAsync()).TotpSecret);
+        Assert.Equal(1, await Run(services, new FakeEnvironment("Development"), new ScriptedConsole("evet"), "reset-admin-totp", "--username", "yok-boyle-biri"));
+    }
+
+    [Fact]
+    public async Task ResetAdminTotp_FullFlow_ShowsTheNewSecretAndNewRecoveryCodesInTheTerminalOnly()
+    {
+        var (services, db) = Services();
+        using var _ = services;
+        db.AdminUsers.Add(new AdminUser { Id = Guid.NewGuid(), Username = "var-olan", PasswordHash = "p", TotpSecret = "JBSWY3DPEHPK3PXP", TotpEnabled = true, Status = AdminStatus.Active, CreatedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+        var console = new ScriptedConsole("evet");
+        console.Override = prompt =>
+        {
+            if (!prompt.StartsWith("Uygulamanın", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var secret = Regex.Match(string.Join("\n", console.Output), @"gizli anahtar\s*:\s*([A-Z2-7]+)").Groups[1].Value;
+            return Totp.Compute(Base32.Decode(secret)!, Totp.StepOf(DateTimeOffset.UtcNow));
+        };
+
+        var exit = await Run(services, new FakeEnvironment("Development"), console, "reset-admin-totp", "--username", "VAR-OLAN");
+
+        Assert.Equal(0, exit);
+        var stored = await db.AdminUsers.SingleAsync();
+        Assert.NotEqual("JBSWY3DPEHPK3PXP", stored.TotpSecret);
+        Assert.DoesNotContain("JBSWY3DPEHPK3PXP", console.All, StringComparison.Ordinal);
+        Assert.Equal(RecoveryCodes.Count, console.Output.Count(l => Regex.IsMatch(l, @"^\s+[A-HJKMNP-Z2-9]{5}-[A-HJKMNP-Z2-9]{5}$")));
+        Assert.Equal(RecoveryCodes.Count, await db.AdminRecoveryCodes.CountAsync());
+        Assert.DoesNotContain("BAGLANTI-PAROLASI-9", console.All, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResetAdminTotp_WithAWrongFirstCode_ChangesNothing()
+    {
+        var (services, db) = Services();
+        using var _ = services;
+        db.AdminUsers.Add(new AdminUser { Id = Guid.NewGuid(), Username = "var-olan", PasswordHash = "p", TotpSecret = "JBSWY3DPEHPK3PXP", TotpEnabled = true, Status = AdminStatus.Active, CreatedAt = DateTimeOffset.UtcNow });
+        db.AdminRecoveryCodes.Add(new AdminRecoveryCode { Id = Guid.NewGuid(), AdminId = db.AdminUsers.Local.Single().Id, CodeHash = "old-hash" });
+        await db.SaveChangesAsync();
+        var console = new ScriptedConsole("evet", "000000");
+
+        Assert.Equal(1, await Run(services, new FakeEnvironment("Development"), console, "reset-admin-totp", "--username", "var-olan"));
+
+        Assert.Equal("JBSWY3DPEHPK3PXP", (await db.AdminUsers.SingleAsync()).TotpSecret);
+        Assert.Equal("old-hash", (await db.AdminRecoveryCodes.SingleAsync()).CodeHash);
+        Assert.Contains(console.Output, l => l.Contains("HİÇBİR ŞEY DEĞİŞMEDİ", StringComparison.Ordinal));
     }
 
     [Theory]
