@@ -432,7 +432,7 @@ public class AdminCrisisServiceTests
 
         Assert.Equal(2, closed);
         var audited = rig.Audit.Calls.Where(c => c.Action == AuditActions.AdminCrisisAcknowledged).ToList();
-        Assert.Equal([a1.Id, a2.Id], audited.Select(c => c.TargetId!.Value).Order());
+        Assert.Equal(new[] { a1.Id, a2.Id }.Order(), audited.Select(c => c.TargetId!.Value).Order()); // as sets: two version-7 ids made in the same millisecond are not always in creation order
         Assert.All(audited, c => Assert.Equal((ActorType.Researcher, rig.AdminId, nameof(Message)), (c.Actor, c.ActorId, c.TargetType)));
 
         var overview = await rig.Crisis.ListAsync(rig.AdminId, openOnly: false, rig.Client, default);
