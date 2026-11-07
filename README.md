@@ -55,6 +55,16 @@ dotnet user-secrets set "Privacy:CurrentDataEncryptionKeyId" "k1" --project src/
 
 Anahtar yoksa ya da 32 bayt değilse uygulama **başlamaz** (mesaj yalnızca ayar adını söyler, değeri değil). Aynı değer Railway'de `Privacy__DataEncryptionKeys__k1` ve `Privacy__CurrentDataEncryptionKeyId` olarak girilir; **iki yerde birebir aynı olmalıdır**. **Anahtar kaybı veri kaybıdır:** bir şifre yöneticisine de kaydedin. Testler kendi sabit **test anahtarıyla** çalışır (gerçek anahtarı kullanmaz).
 
+**Yönetici imzalama anahtarı (Faz 7, zorunlu, Development dahil):** yönetici paneli belirteçleri **ayrı** bir anahtarla imzalanır (en az 32 bayt, `Auth:JwtSigningKey`'den farklı). Üretme komutu çıktıyı yalnızca panoya yazar:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48)) | Set-Clipboard
+cd api
+dotnet user-secrets set "Admin:JwtSigningKey" "<PANODAKİ-DEĞER>" --project src/Chatbot.Api
+```
+
+Railway'de aynı ad `Admin__JwtSigningKey` olur (yerelle aynı olması gerekmez). Anahtar yoksa API **başlamaz**. Yönetici hesapları yalnızca komut satırından açılır (`create-admin`, `set-admin-password`, `disable-admin`, `enable-admin`; ayrıntı `docs/yonetim-kilavuzu.md`). Komutlar hedef veritabanı sunucu adını gösterip `evet` ister.
+
 `Auth:CodePepper` Railway'deki API ile **aynı** olmalıdır (kod hash'leri pepper'a bağlıdır). Ayrıntılar kök [README.md](../README.md) içindeki "Railway'e yayınlama" bölümündedir. Geliştirme ayarları (`Auth:CookieSecure=false`, `Cors:AllowedOrigins`) için `appsettings.Development.example.json` dosyasını `appsettings.Development.json` olarak kopyalayın; bu dosya git'e eklenmez.
 
 ## Uç noktalar
