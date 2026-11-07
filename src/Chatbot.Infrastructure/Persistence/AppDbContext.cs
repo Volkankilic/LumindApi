@@ -169,6 +169,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne<AdminUser>().WithMany().HasForeignKey(x => x.AdminId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.MessageId).IsUnique().HasFilter("reopened_at IS NULL").HasDatabaseName("ux_crisis_acknowledgements_open_message");
             e.HasIndex(x => x.MessageId, "ix_crisis_acknowledgements_message_model").HasDatabaseName("ix_crisis_acknowledgements_message");
+            // 004_crisis_ack_admin_index.sql: the admin_id foreign key has an index (EF expects one for every foreign key).
+            e.HasIndex(x => x.AdminId).HasDatabaseName("ix_crisis_acknowledgements_admin");
         });
 
         ApplySnakeCase(b);

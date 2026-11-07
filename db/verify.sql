@@ -1,5 +1,5 @@
 -- =====================================================================================
--- verify.sql : READ-ONLY check that 001_initial.sql, 002_retention_indexes.sql and 003_admin.sql were applied correctly
+-- verify.sql : READ-ONLY check that 001_initial.sql, 002_retention_indexes.sql, 003_admin.sql and 004_crisis_ack_admin_index.sql were applied correctly
 -- =====================================================================================
 -- Only SELECTs: changes nothing. Run it after 001_initial.sql (and again after any later script).
 -- It returns ONE result table: one row per check, column "ok" is true/false, and the last
@@ -116,7 +116,9 @@ expected_indexes (index_name, pattern) AS (
     ('ix_crisis_acknowledgements_message', '%(message_id)%'),
     ('ux_participants_label', '%UNIQUE%(label)%WHERE%label IS NOT NULL%'),
     ('ix_messages_crisis_created', '%(created_at)%WHERE is_crisis%'),
-    ('ix_audit_logs_actor_action_time', '%(actor_id, action, %timestamp%)%')
+    ('ix_audit_logs_actor_action_time', '%(actor_id, action, %timestamp%)%'),
+    -- 004_crisis_ack_admin_index.sql
+    ('ix_crisis_acknowledgements_admin', '%(admin_id)%')
 ),
 expected_constraints (constraint_name, table_name, kind) AS (
     VALUES
@@ -203,6 +205,10 @@ checks AS (
     UNION ALL
     SELECT 6, 'schema version 3 (admin) is recorded',
            COALESCE((SELECT true FROM public.app_schema_version WHERE version = 3 AND name = 'admin'), false)
+
+    UNION ALL
+    SELECT 6, 'schema version 4 (crisis_ack_admin_index) is recorded',
+           COALESCE((SELECT true FROM public.app_schema_version WHERE version = 4 AND name = 'crisis_ack_admin_index'), false)
 ),
 report AS (
     SELECT sort, check_name, ok FROM checks

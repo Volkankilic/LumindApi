@@ -202,5 +202,5 @@ public sealed class DatabaseOptions
     public const string Section = "Database";
 
     /// <summary>The schema version this build expects (the highest api/db script number).</summary>
-    public int ExpectedSchemaVersion { get; set; } = 3;
+    public int ExpectedSchemaVersion { get; set; } = 4;
 }
