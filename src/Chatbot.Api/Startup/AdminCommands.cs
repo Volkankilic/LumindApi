@@ -69,7 +69,7 @@ public sealed class SystemAdminConsole : IAdminConsole
 /// </summary>
 public static class AdminCommands
 {
-    public static readonly string[] Names = ["create-admin", "set-admin-password", "disable-admin", "enable-admin"];
+    public static readonly string[] Names = ["create-admin", "set-admin-password", "reset-admin-totp", "disable-admin", "enable-admin"];
 
     public static bool IsAdminCommand(string[] args) => args.Any(a => Names.Contains(a));
 
@@ -127,6 +127,7 @@ public static class AdminCommands
         {
             "create-admin" => await CreateAsync(accounts, console, username, ct),
             "set-admin-password" => await SetPasswordAsync(accounts, console, username, ct),
+            "reset-admin-totp" => await ResetTotpAsync(accounts, console, username, ct),
             "disable-admin" => Report(console, await accounts.SetStatusAsync(username, AdminStatus.Disabled, ct), "Hesap devre dışı bırakıldı; açık oturumları kapandı."),
             _ => Report(console, await accounts.SetStatusAsync(username, AdminStatus.Active, ct), "Hesap yeniden etkinleştirildi."),
         };
@@ -184,6 +185,44 @@ public static class AdminCommands
 
         var problem = await accounts.SetPasswordAsync(username, password, ct);
         return Report(console, problem, "Parola değiştirildi; bu hesabın tüm oturumları kapandı.");
+    }
+
+    /// <summary>
+    /// Lost or replaced phone: a new TOTP secret and NEW recovery codes, shown in the terminal only. Nothing changes until the first code of
+    /// the new secret is entered; then the old secret and ALL old recovery codes stop working and every session of the account is closed.
+    /// </summary>
+    private static async Task<int> ResetTotpAsync(AdminAccountService accounts, IAdminConsole console, string username, CancellationToken ct)
+    {
+        var (problem, pending) = await accounts.PrepareTotpResetAsync(username, ct);
+        if (problem != AdminAccountProblem.None || pending is null)
+        {
+            console.WriteLine(Describe(problem));
+            return 1;
+        }
+
+        console.WriteLine();
+        console.WriteLine($"'{pending.Username}' için YENİ kimlik doğrulayıcı kaydı. Kimlik doğrulayıcı uygulamanıza şunu ekleyin (eski kaydı silin).");
+        console.WriteLine("BU BİLGİLER YALNIZCA ŞİMDİ, BU EKRANDA GÖSTERİLİR; dosyaya ya da sohbete yazmayın:");
+        console.WriteLine($"  otpauth adresi : {pending.OtpauthUri}");
+        console.WriteLine($"  gizli anahtar  : {pending.SecretBase32}");
+        console.WriteLine();
+        var code = console.ReadLine("Uygulamanın gösterdiği 6 haneli kodu girin: ");
+        var result = await accounts.ConfirmTotpResetAsync(pending, code, ct);
+        if (result != AdminAccountProblem.None)
+        {
+            console.WriteLine(Describe(result) + " HİÇBİR ŞEY DEĞİŞMEDİ: eski kimlik doğrulayıcı ve eski kurtarma kodları geçerli kalır. Komutu yeniden çalıştırın.");
+            return 1;
+        }
+
+        console.WriteLine();
+        console.WriteLine("Kimlik doğrulayıcı yenilendi. Eski gizli anahtar, ESKİ KURTARMA KODLARININ HEPSİ geçersiz oldu ve hesabın tüm oturumları kapandı.");
+        console.WriteLine("YENİ KURTARMA KODLARI (tek kullanımlık; parola yöneticisine kaydedin):");
+        foreach (var recovery in pending.RecoveryCodes)
+        {
+            console.WriteLine("  " + recovery);
+        }
+
+        return 0;
     }
 
     private static string? ReadNewPassword(IAdminConsole console)

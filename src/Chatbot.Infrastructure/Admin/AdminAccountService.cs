@@ -11,6 +11,9 @@ namespace Chatbot.Infrastructure.Admin;
 /// <summary>An admin that is prepared but NOT stored: it is stored only after the first TOTP code was confirmed.</summary>
 public sealed record PendingAdmin(string Username, string PasswordHash, string SecretBase32, string OtpauthUri, IReadOnlyList<string> RecoveryCodes);
 
+/// <summary>A TOTP reset that is prepared but NOT applied: nothing changes until the first code of the NEW secret is confirmed.</summary>
+public sealed record PendingTotpReset(Guid AdminId, string Username, string SecretBase32, string OtpauthUri, IReadOnlyList<string> RecoveryCodes);
+
 public enum AdminAccountProblem { None, BadUsername, UsernameTaken, WeakPassword, WrongCode, NotFound }
 
 /// <summary>
@@ -146,6 +149,70 @@ public sealed partial class AdminAccountService(
 
         var action = status == AdminStatus.Disabled ? AuditActions.AdminAccountDisabled : AuditActions.AdminAccountEnabled;
         await audit.WriteAsync(ActorType.System, null, action, nameof(AdminUser), admin.Id, null, ct);
+        return AdminAccountProblem.None;
+    }
+
+    /// <summary>
+    /// Step one of "lost phone": a NEW secret and NEW recovery codes are made, but nothing is stored or changed (the old TOTP and the old
+    /// recovery codes keep working until the new secret is confirmed).
+    /// </summary>
+    public async Task<(AdminAccountProblem Problem, PendingTotpReset? Pending)> PrepareTotpResetAsync(string? username, CancellationToken ct)
+    {
+        var name = NormalizeUsername(username);
+        var admin = await db.AdminUsers.AsNoTracking().Where(a => a.Username == name).Select(a => new { a.Id, a.Username }).FirstOrDefaultAsync(ct);
+        if (admin is null)
+        {
+            return (AdminAccountProblem.NotFound, null);
+        }
+
+        var base32 = Base32.Encode(Totp.NewSecret());
+        var codes = Enumerable.Range(0, RecoveryCodes.Count).Select(_ => RecoveryCodes.New()).ToList();
+        return (AdminAccountProblem.None, new PendingTotpReset(admin.Id, admin.Username, base32, Totp.Uri(Issuer, admin.Username, base32), [.. codes.Select(RecoveryCodes.Display)]));
+    }
+
+    /// <summary>
+    /// Step two: checks the first code of the new secret, then in ONE save: replaces the secret, replaces ALL recovery codes (the old ones
+    /// stop working), clears the lock and closes every session. A wrong code changes nothing.
+    /// </summary>
+    public async Task<AdminAccountProblem> ConfirmTotpResetAsync(PendingTotpReset pending, string? firstCode, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var step = Totp.Verify(Base32.Decode(pending.SecretBase32)!, firstCode?.Trim(), now, 0);
+        if (step is null)
+        {
+            return AdminAccountProblem.WrongCode;
+        }
+
+        var admin = await db.AdminUsers.FirstOrDefaultAsync(a => a.Id == pending.AdminId, ct);
+        if (admin is null)
+        {
+            return AdminAccountProblem.NotFound;
+        }
+
+        admin.TotpSecret = pending.SecretBase32;
+        admin.TotpEnabled = true;
+        admin.TotpLastStep = step.Value; // the confirming code cannot sign in
+        admin.FailedAttempts = 0;
+        admin.LockedUntil = null;
+
+        db.AdminRecoveryCodes.RemoveRange(await db.AdminRecoveryCodes.Where(c => c.AdminId == admin.Id).ToListAsync(ct));
+        foreach (var display in pending.RecoveryCodes)
+        {
+            db.AdminRecoveryCodes.Add(new AdminRecoveryCode
+            {
+                Id = Guid.CreateVersion7(),
+                AdminId = admin.Id,
+                CodeHash = hasher.HashCode(RecoveryCodes.Normalize(display)!),
+            });
+        }
+
+        foreach (var token in await db.AdminRefreshTokens.Where(t => t.AdminId == admin.Id && t.RevokedAt == null).ToListAsync(ct))
+        {
+            token.RevokedAt = now;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(ActorType.System, null, AuditActions.AdminTotpReset, nameof(AdminUser), admin.Id, null, ct);
         return AdminAccountProblem.None;
     }
 

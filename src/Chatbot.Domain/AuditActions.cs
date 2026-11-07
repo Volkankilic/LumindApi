@@ -47,6 +47,7 @@ public static class AuditActions
     public const string AdminAccountDisabled = "admin.account.disabled";
     public const string AdminAccountEnabled = "admin.account.enabled";
     public const string AdminPasswordChanged = "admin.password.changed";
+    public const string AdminTotpReset = "admin.totp.reset";
     public const string AdminParticipantCreated = "admin.participant.created";
     public const string AdminParticipantCodeReset = "admin.participant.code-reset";
     public const string AdminParticipantRevoked = "admin.participant.revoked";
@@ -69,7 +70,7 @@ public static class AuditActions
         ConversationStarted, ConversationEnded, ConversationRead, HistoryListed,
         RetentionRun, CrisisDetected,
         AdminLoginSucceeded, AdminLoginFailed, AdminTotpFailed, AdminRecoveryCodeUsed, AdminAccountLocked, AdminLogout,
-        AdminRefreshReuseDetected, AdminAccountCreated, AdminAccountDisabled, AdminAccountEnabled, AdminPasswordChanged,
+        AdminRefreshReuseDetected, AdminAccountCreated, AdminAccountDisabled, AdminAccountEnabled, AdminPasswordChanged, AdminTotpReset,
         AdminParticipantCreated, AdminParticipantCodeReset, AdminParticipantRevoked, AdminParticipantReactivated,
         AdminParticipantViewed, AdminStatsExported, AdminCrisisViewed, AdminCrisisAcknowledged, AdminCrisisReopened,
     ];
