@@ -1,5 +1,6 @@
 using Chatbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
 
@@ -54,6 +55,9 @@ public static class TestDatabase
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(ConnectionString)
             .AddInterceptors(TestEncryption.Shared) // the same interceptor as the application, with the TEST key
+            // The test host creates many ApiFactory hosts (each with a provider of its own). Whichever context is built AFTER the twentieth would
+            // otherwise fail with this warning turned into an exception, and then every later database test fails with it: order dependent.
+            .ConfigureWarnings(w => w.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options);
 
     private static string? ComputeSkipReason()
