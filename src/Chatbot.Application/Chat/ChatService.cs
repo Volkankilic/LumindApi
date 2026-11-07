@@ -68,12 +68,24 @@ public sealed class ChatService(
             await store.DeleteMessageAsync(previousReply.Id, ct);
         }
 
-        var isCrisis = crisisDetector.IsCrisis(clean);
+        // Fail safe: if the detector itself breaks, the message counts as a crisis. (The registered detector already does
+        // this and logs the failure by exception type; this is the last line of defence for any other implementation.)
+        CrisisAssessment assessment;
+        try
+        {
+            assessment = crisisDetector.Assess(clean);
+        }
+        catch (Exception)
+        {
+            assessment = CrisisAssessment.Unavailable;
+        }
+
+        var isCrisis = assessment.IsCrisis;
         if (isCrisis)
         {
             if (!userMessage.IsCrisis)
             {
-                await store.MarkCrisisAsync(userMessage.Id, ct);
+                await store.MarkCrisisAsync(participantId, conversationId, userMessage.Id, ct);
             }
 
             yield return new ChatEvent.Crisis();
@@ -84,7 +96,7 @@ public sealed class ChatService(
         try
         {
             IAsyncEnumerable<string> source = isCrisis
-                ? AsAsync(ChatRules.Chunks(crisisReplies.GetReply()))
+                ? AsAsync(ChatRules.Chunks(crisisReplies.GetReply(assessment)))
                 : responder.StreamReplyAsync(await BuildContextAsync(conversationId, clientMessageId, ct), ct);
 
             await using var enumerator = source.GetAsyncEnumerator(ct);

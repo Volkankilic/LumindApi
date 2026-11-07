@@ -1,4 +1,5 @@
 using Chatbot.Application.Abstractions;
+using Chatbot.Application.Chat;
 using Chatbot.Application.Options;
 
 namespace Chatbot.Api.Startup;
@@ -13,10 +14,19 @@ public sealed class ConfigurationValidationService(
     PrivacyOptions privacy,
     DocumentsOptions documents,
     ChatOptions chat,
+    ICrisisDetector crisisDetector,
     IHostEnvironment environment) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // Production must never run without the real crisis detector (the no-op flags nothing). The message names the
+        // requirement only. (Resolving the detector above also loads and logs the phrase list version at startup.)
+        if (environment.IsProduction() && !crisisDetector.IsProductionGrade)
+        {
+            throw new InvalidOperationException(
+                "Invalid configuration: a production-grade (rule based) crisis detector is required in Production; the no-op detector is not allowed.");
+        }
+
         var problems = OptionsValidator.Validate(
             auth,
             privacy,

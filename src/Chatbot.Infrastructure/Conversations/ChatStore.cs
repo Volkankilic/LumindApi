@@ -1,12 +1,14 @@
+using Chatbot.Application.Abstractions;
 using Chatbot.Application.Chat;
 using Chatbot.Domain;
 using Chatbot.Domain.Entities;
 using Chatbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Chatbot.Infrastructure.Conversations;
 
-public sealed class ChatStore(AppDbContext db, TimeProvider clock) : IChatStore
+public sealed class ChatStore(AppDbContext db, TimeProvider clock, IAuditWriter audit, ILogger<ChatStore> logger) : IChatStore
 {
     public Task<Conversation?> FindOwnedConversationAsync(Guid participantId, Guid conversationId, CancellationToken ct) =>
         db.Conversations.AsNoTracking()
@@ -74,9 +76,25 @@ public sealed class ChatStore(AppDbContext db, TimeProvider clock) : IChatStore
     public Task DeleteMessageAsync(Guid messageId, CancellationToken ct) =>
         db.Messages.Where(m => m.Id == messageId).ExecuteDeleteAsync(ct);
 
-    public Task MarkCrisisAsync(Guid messageId, CancellationToken ct) =>
-        db.Messages.Where(m => m.Id == messageId)
+    public async Task MarkCrisisAsync(Guid participantId, Guid conversationId, Guid messageId, CancellationToken ct)
+    {
+        await db.Messages.Where(m => m.Id == messageId)
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsCrisis, true), ct);
+
+        // The flag is what matters: an audit failure must never keep the safe reply (card, 112) from the participant.
+        try
+        {
+            await audit.WriteAsync(ActorType.Participant, participantId, AuditActions.CrisisDetected, nameof(Conversation), conversationId, null, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("Writing the crisis audit entry failed with an exception of type {ExceptionType}", ex.GetType().FullName);
+        }
+    }
 
     public async Task<IReadOnlyList<Message>> GetRecentAsync(Guid conversationId, int take, CancellationToken ct)
     {

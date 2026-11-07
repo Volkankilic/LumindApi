@@ -3,6 +3,7 @@ using Chatbot.Application.Chat;
 using Chatbot.Application.Conversations;
 using Chatbot.Application.Options;
 using Chatbot.Infrastructure.Chat;
+using Chatbot.Infrastructure.Chat.Crisis;
 using Chatbot.Infrastructure.Conversations;
 using Chatbot.Infrastructure.Dev;
 using Chatbot.Infrastructure.Participants;
@@ -13,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Chatbot.Infrastructure;
 
@@ -65,10 +67,17 @@ public static class DependencyInjection
         services.AddSingleton<IPiiRedactor, Chatbot.Infrastructure.Privacy.RulePiiRedactor>();
         services.AddSingleton<ICrisisResponseProvider, CrisisResponseProvider>();
 
-        // Real crisis detection arrives in phase 5. Until then: nothing is flagged, except the clearly marked
-        // keyword stand-in that exists in Development only.
+        // Crisis detection (phase 5, ADR 008): the rule based detector in EVERY environment, wrapped so that a failure
+        // counts as a crisis. Development adds the keyword stand-in next to it (the e2e tests use its phrases).
+        // Production refuses to start without a production-grade detector (ConfigurationValidationService).
         services.AddSingleton<ICrisisDetector>(sp =>
-            sp.GetRequiredService<IHostEnvironment>().IsDevelopment() ? new DevKeywordCrisisDetector() : new NoopCrisisDetector());
+        {
+            var rules = RuleCrisisDetector.CreateDefault(sp.GetRequiredService<ILogger<RuleCrisisDetector>>());
+            ICrisisDetector inner = sp.GetRequiredService<IHostEnvironment>().IsDevelopment()
+                ? new CompositeCrisisDetector(rules, new DevKeywordCrisisDetector())
+                : rules;
+            return new FailSafeCrisisDetector(inner, sp.GetRequiredService<ILogger<FailSafeCrisisDetector>>());
+        });
 
         // Development-only trigger words (/hata, /limit, /yarim, /yavas, /kisa).
         services.AddSingleton<DevChatTriggers>();

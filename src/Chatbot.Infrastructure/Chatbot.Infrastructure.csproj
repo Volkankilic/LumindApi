@@ -6,6 +6,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The crisis phrase list ships inside the assembly: no file to lose in a deployment, no I/O at runtime. -->
+    <!-- WithCulture=false: MSBuild would read ".tr." in the name as the Turkish culture and move the file into a satellite assembly. -->
+    <EmbeddedResource Include="Chat\Crisis\crisis-phrases.tr.json" WithCulture="false" LogicalName="Chatbot.Infrastructure.Chat.Crisis.crisis-phrases.tr.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Shared framework only (IHostEnvironment, configuration): no extra package. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />

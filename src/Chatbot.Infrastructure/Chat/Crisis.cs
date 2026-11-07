@@ -2,18 +2,20 @@ using Chatbot.Application.Chat;
 
 namespace Chatbot.Infrastructure.Chat;
 
-/// <summary>The default detector: flags nothing. Real, rule based detection comes in phase 5 with the clinical team.</summary>
+/// <summary>
+/// Flags nothing. It exists for tests and as the thing Production must NEVER run with: the startup check refuses to
+/// start Production unless a production-grade detector (<see cref="Crisis.RuleCrisisDetector"/>) is registered.
+/// </summary>
 public sealed class NoopCrisisDetector : ICrisisDetector
 {
-    public bool IsCrisis(string text) => false;
+    public CrisisAssessment Assess(string text) => CrisisAssessment.None;
 }
 
 /// <summary>
 /// WARNING: this is NOT real crisis detection. It recognises a few phrases only so the crisis flow (flag, "crisis" event,
-/// safe reply, emergency card in the client) can be tried in Development. It is registered in Development ONLY.
-/// Real detection (rule based, built with the clinical team, independent of any AI) arrives in phase 5.
+/// safe reply, emergency card in the client) can be tried in Development. It is registered in Development ONLY, next to
+/// the real <see cref="Crisis.RuleCrisisDetector"/> (either one can raise the flag); the e2e tests rely on these phrases.
 /// </summary>
-// TODO(volkan): replace with the clinically approved, rule based detector (phase 5).
 public sealed class DevKeywordCrisisDetector : ICrisisDetector
 {
     // The same phrases as the client mock (MOCK_CRISIS_PHRASES).
@@ -25,10 +27,12 @@ public sealed class DevKeywordCrisisDetector : ICrisisDetector
         "ölmek istiyorum",
     ];
 
-    public bool IsCrisis(string text)
+    public CrisisAssessment Assess(string text)
     {
         var normalized = TurkishText.Lower(text);
-        return Phrases.Any(p => normalized.Contains(p, StringComparison.Ordinal));
+        return Phrases.Any(p => normalized.Contains(p, StringComparison.Ordinal))
+            ? CrisisAssessment.Of(CrisisCategory.Unknown)
+            : CrisisAssessment.None;
     }
 }
 
@@ -42,7 +46,8 @@ public sealed class CrisisResponseProvider : ICrisisResponseProvider
     public const string Reply =
         "Bu duyguların ağırlığını hissediyorum. Güvende olman çok önemli. Kendine zarar verme düşüncelerin varsa lütfen en yakın sağlık profesyoneline başvur ya da 112’yi ara.";
 
-    public string GetReply() => Reply;
+    // TODO(volkan): clinical approval: whether a category (e.g. a medical emergency) needs its own text. Today every category gets this reply.
+    public string GetReply(CrisisAssessment assessment) => Reply;
 }
 
 /// <summary>Phase 4 puts the PII masking service here. For now text passes through unchanged.</summary>

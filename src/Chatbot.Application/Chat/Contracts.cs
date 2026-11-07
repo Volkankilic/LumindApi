@@ -38,17 +38,57 @@ public interface IChatResponder
 }
 
 /// <summary>
+/// What kind of crisis wording was recognised. It lives in MEMORY only, for the current request: it is never stored,
+/// logged, audited, sent in an API answer or shown in the client (ADR 008, section 6). Its one purpose is that a later,
+/// clinically approved step can choose the reply text by category without rebuilding the pipeline.
+/// </summary>
+public enum CrisisCategory
+{
+    None,
+    DeathWish,
+    Intent,
+    Means,
+    Hopelessness,
+    SelfHarm,
+    HarmToOthers,
+    MedicalEmergency,
+
+    /// <summary>The detector failed, so the message is treated as a crisis without knowing why.</summary>
+    Unknown,
+}
+
+/// <summary>The result of looking at one message. Do not log it or persist it (see <see cref="CrisisCategory"/>).</summary>
+public readonly record struct CrisisAssessment(bool IsCrisis, CrisisCategory Category)
+{
+    public static CrisisAssessment None { get; } = new(false, CrisisCategory.None);
+
+    /// <summary>Fail safe: used when the detector itself failed.</summary>
+    public static CrisisAssessment Unavailable { get; } = new(true, CrisisCategory.Unknown);
+
+    public static CrisisAssessment Of(CrisisCategory category) => new(true, category);
+}
+
+/// <summary>
 /// Decides whether a message is a crisis. It runs BEFORE the responder: a crisis never reaches it.
 /// </summary>
 public interface ICrisisDetector
 {
-    bool IsCrisis(string text);
+    CrisisAssessment Assess(string text);
+
+    bool IsCrisis(string text) => Assess(text).IsCrisis;
+
+    /// <summary>
+    /// True only for the real, rule based detector. Production refuses to start without one (the no-op and the
+    /// Development keyword stand-in answer false).
+    /// </summary>
+    bool IsProductionGrade => false;
 }
 
 /// <summary>The fixed, safe reply streamed instead of a model reply during a crisis.</summary>
 public interface ICrisisResponseProvider
 {
-    string GetReply();
+    /// <summary>Today every category gets the same reply; the assessment is here so a category can pick the text later.</summary>
+    string GetReply(CrisisAssessment assessment);
 }
 
 /// <summary>Phase 4 masks personal data here before text leaves for a model. Today it passes the text through.</summary>
@@ -82,7 +122,12 @@ public interface IChatStore
 
     Task DeleteMessageAsync(Guid messageId, CancellationToken ct);
 
-    Task MarkCrisisAsync(Guid messageId, CancellationToken ct);
+    /// <summary>
+    /// Flags the user message as a crisis and writes the content-free <c>crisis.detected</c> audit entry (participant,
+    /// conversation, time: no text, no phrase, no category). The caller flags a message only once, so there is one entry per message.
+    /// A failure to audit is logged without content and never stops the safe flow.
+    /// </summary>
+    Task MarkCrisisAsync(Guid participantId, Guid conversationId, Guid messageId, CancellationToken ct);
 
     /// <summary>The latest messages of the conversation, oldest first.</summary>
     Task<IReadOnlyList<Message>> GetRecentAsync(Guid conversationId, int take, CancellationToken ct);

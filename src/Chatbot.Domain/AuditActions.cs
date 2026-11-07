@@ -32,6 +32,9 @@ public static class AuditActions
 
     public const string RetentionRun = "retention.run";
 
+    /// <summary>A user message was flagged by crisis detection. Carries the participant and the conversation only: no text, phrase or category.</summary>
+    public const string CrisisDetected = "crisis.detected";
+
     /// <summary>The name written for a consent record, e.g. consent.explicitconsent.withdrawn.</summary>
     public static string Consent(ConsentType type, bool granted) =>
         $"consent.{type.ToString().ToLowerInvariant()}.{(granted ? "granted" : "withdrawn")}";
@@ -42,6 +45,6 @@ public static class AuditActions
         ConsentNoticeGranted, ConsentExplicitGranted, ConsentExplicitWithdrawn, ConsentResearchGranted, ConsentResearchWithdrawn,
         ParticipantNicknameSet, ParticipantDeleted, ParticipantRevoked,
         ConversationStarted, ConversationEnded, ConversationRead, HistoryListed,
-        RetentionRun,
+        RetentionRun, CrisisDetected,
     ];
 }
