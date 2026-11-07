@@ -1,5 +1,5 @@
 -- =====================================================================================
--- verify.sql : READ-ONLY check that 001_initial.sql and 002_retention_indexes.sql were applied correctly
+-- verify.sql : READ-ONLY check that 001_initial.sql, 002_retention_indexes.sql and 003_admin.sql were applied correctly
 -- =====================================================================================
 -- Only SELECTs: changes nothing. Run it after 001_initial.sql (and again after any later script).
 -- It returns ONE result table: one row per check, column "ok" is true/false, and the last
@@ -51,11 +51,43 @@ WITH expected_columns (table_name, column_name, data_type, is_nullable) AS (
     ('audit_logs',      'target_type',           'text',                     'YES'),
     ('audit_logs',      'target_id',             'uuid',                     'YES'),
     ('audit_logs',      'timestamp',             'timestamp with time zone', 'NO'),
-    ('audit_logs',      'ip_hash',               'text',                     'YES')
+    ('audit_logs',      'ip_hash',               'text',                     'YES'),
+    -- 003_admin.sql
+    ('admin_users', 'id', 'uuid', 'NO'),
+    ('admin_users', 'username', 'text', 'NO'),
+    ('admin_users', 'password_hash', 'text', 'NO'),
+    ('admin_users', 'totp_secret', 'text', 'YES'),
+    ('admin_users', 'totp_enabled', 'boolean', 'NO'),
+    ('admin_users', 'totp_last_step', 'bigint', 'NO'),
+    ('admin_users', 'status', 'text', 'NO'),
+    ('admin_users', 'failed_attempts', 'integer', 'NO'),
+    ('admin_users', 'locked_until', 'timestamp with time zone', 'YES'),
+    ('admin_users', 'created_at', 'timestamp with time zone', 'NO'),
+    ('admin_users', 'last_login_at', 'timestamp with time zone', 'YES'),
+    ('admin_refresh_tokens', 'id', 'uuid', 'NO'),
+    ('admin_refresh_tokens', 'admin_id', 'uuid', 'NO'),
+    ('admin_refresh_tokens', 'token_hash', 'text', 'NO'),
+    ('admin_refresh_tokens', 'family_id', 'uuid', 'NO'),
+    ('admin_refresh_tokens', 'created_at', 'timestamp with time zone', 'NO'),
+    ('admin_refresh_tokens', 'expires_at', 'timestamp with time zone', 'NO'),
+    ('admin_refresh_tokens', 'family_expires_at', 'timestamp with time zone', 'NO'),
+    ('admin_refresh_tokens', 'revoked_at', 'timestamp with time zone', 'YES'),
+    ('admin_refresh_tokens', 'replaced_by_token_id', 'uuid', 'YES'),
+    ('admin_recovery_codes', 'id', 'uuid', 'NO'),
+    ('admin_recovery_codes', 'admin_id', 'uuid', 'NO'),
+    ('admin_recovery_codes', 'code_hash', 'text', 'NO'),
+    ('admin_recovery_codes', 'used_at', 'timestamp with time zone', 'YES'),
+    ('crisis_acknowledgements', 'id', 'uuid', 'NO'),
+    ('crisis_acknowledgements', 'message_id', 'uuid', 'NO'),
+    ('crisis_acknowledgements', 'admin_id', 'uuid', 'NO'),
+    ('crisis_acknowledgements', 'acknowledged_at', 'timestamp with time zone', 'NO'),
+    ('crisis_acknowledgements', 'reopened_at', 'timestamp with time zone', 'YES'),
+    ('crisis_acknowledgements', 'reopened_by_admin_id', 'uuid', 'YES')
 ),
 expected_tables (table_name) AS (
     VALUES ('app_schema_version'), ('participants'), ('consent_records'), ('conversations'),
-           ('messages'), ('refresh_tokens'), ('audit_logs')
+           ('messages'), ('refresh_tokens'), ('audit_logs'),
+           ('admin_users'), ('admin_refresh_tokens'), ('admin_recovery_codes'), ('crisis_acknowledgements')
 ),
 -- Indexes by name. "pattern" is matched against pg_indexes.indexdef (NULL = existence only).
 expected_indexes (index_name, pattern) AS (
@@ -73,7 +105,18 @@ expected_indexes (index_name, pattern) AS (
     ('ix_audit_logs_actor_time',                     '%(actor_id, %timestamp%)%'),
     -- 002_retention_indexes.sql
     ('ix_audit_logs_timestamp',                      '%("timestamp")%'),
-    ('ix_audit_logs_anonymous_timestamp',            '%("timestamp")%WHERE (actor_type = ''Anonymous''%')
+    ('ix_audit_logs_anonymous_timestamp',            '%("timestamp")%WHERE (actor_type = ''Anonymous''%'),
+    -- 003_admin.sql
+    ('ux_admin_users_username', '%UNIQUE%(username)%'),
+    ('ux_admin_refresh_tokens_token_hash', '%UNIQUE%(token_hash)%'),
+    ('ix_admin_refresh_tokens_family', '%(family_id)%'),
+    ('ix_admin_refresh_tokens_admin', '%(admin_id)%'),
+    ('ux_admin_recovery_codes_admin_hash', '%UNIQUE%(admin_id, code_hash)%'),
+    ('ux_crisis_acknowledgements_open_message', '%UNIQUE%(message_id)%WHERE (reopened_at IS NULL)%'),
+    ('ix_crisis_acknowledgements_message', '%(message_id)%'),
+    ('ux_participants_label', '%UNIQUE%(label)%WHERE%label IS NOT NULL%'),
+    ('ix_messages_crisis_created', '%(created_at)%WHERE is_crisis%'),
+    ('ix_audit_logs_actor_action_time', '%(actor_id, action, %timestamp%)%')
 ),
 expected_constraints (constraint_name, table_name, kind) AS (
     VALUES
@@ -95,7 +138,17 @@ expected_constraints (constraint_name, table_name, kind) AS (
     ('fk_consent_records_participant_id',      'consent_records',    'f'),
     ('fk_conversations_participant_id',        'conversations',      'f'),
     ('fk_messages_conversation_id',            'messages',           'f'),
-    ('fk_refresh_tokens_participant_id',       'refresh_tokens',     'f')
+    ('fk_refresh_tokens_participant_id',       'refresh_tokens',     'f'),
+    -- 003_admin.sql
+    ('pk_admin_users', 'admin_users', 'p'),
+    ('pk_admin_refresh_tokens', 'admin_refresh_tokens', 'p'),
+    ('pk_admin_recovery_codes', 'admin_recovery_codes', 'p'),
+    ('pk_crisis_acknowledgements', 'crisis_acknowledgements', 'p'),
+    ('ck_admin_users_status', 'admin_users', 'c'),
+    ('fk_admin_refresh_tokens_admin_id', 'admin_refresh_tokens', 'f'),
+    ('fk_admin_recovery_codes_admin_id', 'admin_recovery_codes', 'f'),
+    ('fk_crisis_acknowledgements_message_id', 'crisis_acknowledgements', 'f'),
+    ('fk_crisis_acknowledgements_admin_id', 'crisis_acknowledgements', 'f')
 ),
 checks AS (
     SELECT 1 AS sort, 'table ' || t.table_name AS check_name,
@@ -146,6 +199,10 @@ checks AS (
     UNION ALL
     SELECT 6, 'schema version 2 (retention_indexes) is recorded',
            COALESCE((SELECT true FROM public.app_schema_version WHERE version = 2 AND name = 'retention_indexes'), false)
+
+    UNION ALL
+    SELECT 6, 'schema version 3 (admin) is recorded',
+           COALESCE((SELECT true FROM public.app_schema_version WHERE version = 3 AND name = 'admin'), false)
 ),
 report AS (
     SELECT sort, check_name, ok FROM checks

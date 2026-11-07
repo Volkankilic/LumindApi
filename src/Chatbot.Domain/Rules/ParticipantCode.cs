@@ -32,6 +32,18 @@ public static class ParticipantCode
         return sb.ToString();
     }
 
+    /// <summary>A new random code: uniform over the alphabet (rejection-free, via GetItems on a cryptographic source).</summary>
+    public static string Generate()
+    {
+        var chars = new char[Length];
+        for (var i = 0; i < chars.Length; i++)
+        {
+            chars[i] = Alphabet[System.Security.Cryptography.RandomNumberGenerator.GetInt32(Alphabet.Length)];
+        }
+
+        return new string(chars);
+    }
+
     public static bool IsValid(string normalized) =>
         normalized.Length == Length && normalized.All(c => Alphabet.Contains(c, StringComparison.Ordinal));
 }

@@ -23,6 +23,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
+
+    public DbSet<AdminRefreshToken> AdminRefreshTokens => Set<AdminRefreshToken>();
+
+    public DbSet<AdminRecoveryCode> AdminRecoveryCodes => Set<AdminRecoveryCode>();
+
+    public DbSet<CrisisAcknowledgement> CrisisAcknowledgements => Set<CrisisAcknowledgement>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasDefaultSchema("public");
@@ -35,6 +43,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Status).HasConversion<string>();
             e.HasIndex(x => x.CodeHash).IsUnique().HasDatabaseName("ux_participants_code_hash");
             e.HasIndex(x => x.Label).HasDatabaseName("ix_participants_label");
+            // 003_admin.sql: a label names one participant (empty labels are not compared).
+            e.HasIndex(x => x.Label, "ux_participants_label_unique").IsUnique().HasFilter("label IS NOT NULL AND label <> ''").HasDatabaseName("ux_participants_label");
         });
 
         b.Entity<ConsentRecord>(e =>
@@ -86,6 +96,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.ConversationId, x.ClientMessageId }).IsUnique()
                 .HasFilter("client_message_id IS NOT NULL").HasDatabaseName("ux_messages_conversation_client_message");
             e.HasIndex(x => new { x.ConversationId, x.CreatedAt }).HasDatabaseName("ix_messages_conversation_created");
+            // 003_admin.sql: the admin crisis list reads the flagged messages by time.
+            e.HasIndex(x => x.CreatedAt, "ix_messages_crisis_created_model").HasFilter("is_crisis").HasDatabaseName("ix_messages_crisis_created");
         });
 
         b.Entity<RefreshToken>(e =>
@@ -107,10 +119,56 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.ActorType).HasConversion<string>();
             // No foreign key on actor_id: audit entries must outlive a deleted participant.
             e.HasIndex(x => new { x.ActorId, x.Timestamp }).HasDatabaseName("ix_audit_logs_actor_time");
+            // 003_admin.sql: login counts and first/last login per participant.
+            e.HasIndex(x => new { x.ActorId, x.Action, x.Timestamp }).HasDatabaseName("ix_audit_logs_actor_action_time");
             // 002_retention_indexes.sql: the retention job deletes audit rows by age.
             e.HasIndex(x => x.Timestamp).HasDatabaseName("ix_audit_logs_timestamp");
             // A second index on the same column needs a model name of its own, otherwise EF folds it into the one above.
             e.HasIndex(x => x.Timestamp, "ix_audit_logs_anonymous_timestamp").HasFilter("actor_type = 'Anonymous'").HasDatabaseName("ix_audit_logs_anonymous_timestamp");
+        });
+
+        b.Entity<AdminUser>(e =>
+        {
+            e.ToTable("admin_users", t => t.HasCheckConstraint("ck_admin_users_status", EnumCheck("status", typeof(AdminStatus))));
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.Property(x => x.Status).HasConversion<string>();
+            e.Property(x => x.TotpEnabled).HasDefaultValue(false);
+            e.Property(x => x.TotpLastStep).HasDefaultValue(0L);
+            e.Property(x => x.FailedAttempts).HasDefaultValue(0);
+            e.HasIndex(x => x.Username).IsUnique().HasDatabaseName("ux_admin_users_username");
+        });
+
+        b.Entity<AdminRefreshToken>(e =>
+        {
+            e.ToTable("admin_refresh_tokens");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.HasOne<AdminUser>().WithMany().HasForeignKey(x => x.AdminId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("ux_admin_refresh_tokens_token_hash");
+            e.HasIndex(x => x.FamilyId).HasDatabaseName("ix_admin_refresh_tokens_family");
+            e.HasIndex(x => x.AdminId).HasDatabaseName("ix_admin_refresh_tokens_admin");
+        });
+
+        b.Entity<AdminRecoveryCode>(e =>
+        {
+            e.ToTable("admin_recovery_codes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.HasOne<AdminUser>().WithMany().HasForeignKey(x => x.AdminId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.AdminId, x.CodeHash }).IsUnique().HasDatabaseName("ux_admin_recovery_codes_admin_hash");
+        });
+
+        b.Entity<CrisisAcknowledgement>(e =>
+        {
+            e.ToTable("crisis_acknowledgements");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedNever();
+            // The flagged message goes away with its conversation (retention, erasure): the acknowledgement goes with it.
+            e.HasOne<Message>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AdminUser>().WithMany().HasForeignKey(x => x.AdminId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.MessageId).IsUnique().HasFilter("reopened_at IS NULL").HasDatabaseName("ux_crisis_acknowledgements_open_message");
+            e.HasIndex(x => x.MessageId, "ix_crisis_acknowledgements_message_model").HasDatabaseName("ix_crisis_acknowledgements_message");
         });
 
         ApplySnakeCase(b);

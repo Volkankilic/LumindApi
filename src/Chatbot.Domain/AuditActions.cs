@@ -35,6 +35,28 @@ public static class AuditActions
     /// <summary>A user message was flagged by crisis detection. Carries the participant and the conversation only: no text, phrase or category.</summary>
     public const string CrisisDetected = "crisis.detected";
 
+    // ---- Admin panel (phase 7). Actor: Researcher (a failed sign-in of an unknown name: Anonymous). Never content.
+    public const string AdminLoginSucceeded = "admin.login.succeeded";
+    public const string AdminLoginFailed = "admin.login.failed";
+    public const string AdminTotpFailed = "admin.totp.failed";
+    public const string AdminRecoveryCodeUsed = "admin.recovery-code.used";
+    public const string AdminAccountLocked = "admin.account.locked";
+    public const string AdminLogout = "admin.logout";
+    public const string AdminRefreshReuseDetected = "admin.refresh.reuse-detected";
+    public const string AdminAccountCreated = "admin.account.created";
+    public const string AdminAccountDisabled = "admin.account.disabled";
+    public const string AdminAccountEnabled = "admin.account.enabled";
+    public const string AdminPasswordChanged = "admin.password.changed";
+    public const string AdminParticipantCreated = "admin.participant.created";
+    public const string AdminParticipantCodeReset = "admin.participant.code-reset";
+    public const string AdminParticipantRevoked = "admin.participant.revoked";
+    public const string AdminParticipantReactivated = "admin.participant.reactivated";
+    public const string AdminParticipantViewed = "admin.participant.viewed";
+    public const string AdminStatsExported = "admin.stats.exported";
+    public const string AdminCrisisViewed = "admin.crisis.viewed";
+    public const string AdminCrisisAcknowledged = "admin.crisis.acknowledged";
+    public const string AdminCrisisReopened = "admin.crisis.reopened";
+
     /// <summary>The name written for a consent record, e.g. consent.explicitconsent.withdrawn.</summary>
     public static string Consent(ConsentType type, bool granted) =>
         $"consent.{type.ToString().ToLowerInvariant()}.{(granted ? "granted" : "withdrawn")}";
@@ -46,5 +68,9 @@ public static class AuditActions
         ParticipantNicknameSet, ParticipantDeleted, ParticipantRevoked,
         ConversationStarted, ConversationEnded, ConversationRead, HistoryListed,
         RetentionRun, CrisisDetected,
+        AdminLoginSucceeded, AdminLoginFailed, AdminTotpFailed, AdminRecoveryCodeUsed, AdminAccountLocked, AdminLogout,
+        AdminRefreshReuseDetected, AdminAccountCreated, AdminAccountDisabled, AdminAccountEnabled, AdminPasswordChanged,
+        AdminParticipantCreated, AdminParticipantCodeReset, AdminParticipantRevoked, AdminParticipantReactivated,
+        AdminParticipantViewed, AdminStatsExported, AdminCrisisViewed, AdminCrisisAcknowledged, AdminCrisisReopened,
     ];
 }

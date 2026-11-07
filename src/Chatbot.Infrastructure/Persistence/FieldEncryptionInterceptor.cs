@@ -27,6 +27,7 @@ public sealed class FieldEncryptionInterceptor(IFieldProtector protector, ILogge
 {
     public const string MessagesTable = "messages";
     public const string ParticipantsTable = "participants";
+    public const string AdminUsersTable = "admin_users";
 
     private sealed record Pending(EntityEntry Entry, string Property, string Plain);
 
@@ -96,6 +97,14 @@ public sealed class FieldEncryptionInterceptor(IFieldProtector protector, ILogge
         foreach (var entry in context.ChangeTracker.Entries<Participant>().Where(Writes<Participant>(nameof(Participant.Nickname))))
         {
             Protect(entry, nameof(Participant.Nickname), ParticipantsTable, "nickname", entry.Entity.Id, pending);
+        }
+
+        foreach (var entry in context.ChangeTracker.Entries<AdminUser>().Where(Writes<AdminUser>(nameof(AdminUser.TotpSecret))))
+        {
+            if (entry.Entity.TotpSecret is not null)
+            {
+                Protect(entry, nameof(AdminUser.TotpSecret), AdminUsersTable, "totp_secret", entry.Entity.Id, pending);
+            }
         }
 
         if (pending.Count > 0)
@@ -169,6 +178,9 @@ public sealed class FieldEncryptionInterceptor(IFieldProtector protector, ILogge
                 break;
             case Participant { Nickname: { } nickname } participant:
                 participant.Nickname = Decrypt(ParticipantsTable, "nickname", participant.Id, nickname);
+                break;
+            case AdminUser { TotpSecret: { } secret } admin:
+                admin.TotpSecret = Decrypt(AdminUsersTable, "totp_secret", admin.Id, secret);
                 break;
         }
 
