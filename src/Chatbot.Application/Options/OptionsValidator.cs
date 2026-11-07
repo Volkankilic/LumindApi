@@ -17,7 +17,8 @@ public static class OptionsValidator
         string? connectionString,
         IEnumerable<string> corsOrigins,
         bool requireDatabase,
-        bool production = false)
+        bool production = false,
+        AdminAuthOptions? admin = null)
     {
         var problems = new List<string>();
 
@@ -79,11 +80,73 @@ public static class OptionsValidator
 
             problems.AddRange(ValidateEncryption(privacy));
             problems.AddRange(ValidateRetention(privacy));
+            if (admin is not null)
+            {
+                problems.AddRange(ValidateAdmin(admin, auth));
+            }
 
             if (auth.FailureBudgetThreshold < 0 || auth.FailureBudgetWindowMinutes < 1)
             {
                 problems.Add("Auth:FailureBudgetThreshold must not be negative and Auth:FailureBudgetWindowMinutes must be positive.");
             }
+        }
+
+        return problems;
+    }
+
+    /// <summary>The admin panel settings. Messages name the SETTING only.</summary>
+    public static IReadOnlyList<string> ValidateAdmin(AdminAuthOptions admin, AuthOptions auth)
+    {
+        var problems = new List<string>();
+        Secret(problems, "Admin:JwtSigningKey", admin.JwtSigningKey);
+        if (!string.IsNullOrEmpty(admin.JwtSigningKey) && string.Equals(admin.JwtSigningKey, auth.JwtSigningKey, StringComparison.Ordinal))
+        {
+            problems.Add("Admin:JwtSigningKey must differ from Auth:JwtSigningKey.");
+        }
+
+        if (string.IsNullOrWhiteSpace(admin.Issuer) || string.IsNullOrWhiteSpace(admin.Audience) || string.IsNullOrWhiteSpace(admin.MfaAudience))
+        {
+            problems.Add("Admin:Issuer, Admin:Audience and Admin:MfaAudience are required.");
+        }
+        else if (new[] { admin.Audience, admin.MfaAudience, auth.Audience }.Distinct(StringComparer.Ordinal).Count() != 3)
+        {
+            problems.Add("Admin:Audience, Admin:MfaAudience and Auth:Audience must all be different.");
+        }
+
+        if (admin.AccessTokenMinutes is < 1 or > 30 || admin.MfaTokenMinutes is < 1 or > 15)
+        {
+            problems.Add("Admin:AccessTokenMinutes must be 1-30 and Admin:MfaTokenMinutes 1-15.");
+        }
+
+        if (admin.IdleMinutes < 1 || admin.AbsoluteSessionHours < 1 || admin.IdleMinutes > admin.AbsoluteSessionHours * 60)
+        {
+            problems.Add("Admin:IdleMinutes and Admin:AbsoluteSessionHours must be positive and the idle time not longer than the absolute time.");
+        }
+
+        if (admin.LoginAttempts < 1 || admin.LoginWindowSeconds < 1 || admin.TotpAttempts < 1 || admin.TotpWindowSeconds < 1
+            || admin.RefreshAttempts < 1 || admin.RefreshWindowSeconds < 1)
+        {
+            problems.Add("The Admin:*Attempts and Admin:*WindowSeconds settings must be positive.");
+        }
+
+        if (admin.LockAfterFailures < 1 || admin.LockMaxMinutes < 1)
+        {
+            problems.Add("Admin:LockAfterFailures and Admin:LockMaxMinutes must be positive.");
+        }
+
+        if (admin.PasswordMinLength < 14)
+        {
+            problems.Add("Admin:PasswordMinLength must not be below 14.");
+        }
+
+        if (admin.Pbkdf2Iterations < 210_000)
+        {
+            problems.Add("Admin:Pbkdf2Iterations must not be below 210000.");
+        }
+
+        if (admin.AbandonedAfterHours < 1 || admin.ActiveGapMinutes < 1 || admin.MaxBulkCreate is < 1 or > 500)
+        {
+            problems.Add("Admin:AbandonedAfterHours and Admin:ActiveGapMinutes must be positive and Admin:MaxBulkCreate 1-500.");
         }
 
         return problems;

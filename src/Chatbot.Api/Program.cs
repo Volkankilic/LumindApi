@@ -57,6 +57,14 @@ if (args.Contains("generate-seed"))
     return SeedCommand.Run(app.Environment, app.Services, args);
 }
 
+// `create-admin | set-admin-password | disable-admin | enable-admin --username <name>` (ADR 009): Development, run locally; shows the target
+// database server and asks for "evet" before anything happens. Nothing here starts the web server.
+if (AdminCommands.IsAdminCommand(args))
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    return await AdminCommands.RunAsync(app.Environment, app.Services, args, new SystemAdminConsole());
+}
+
 // Forwarded headers (the real client IP behind a proxy) are trusted ONLY from proxies named in configuration.
 var forwarded = ApiServices.BuildForwardedHeaders(app.Configuration);
 if (forwarded is not null)

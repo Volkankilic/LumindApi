@@ -46,6 +46,66 @@ public sealed class AuthOptions
     public int FailureBudgetWindowMinutes { get; set; } = 10;
 }
 
+/// <summary>
+/// The admin panel (phase 7). Its own signing key and audience: a participant token never works here and the reverse.
+/// Section "Admin" (environment variable names: Admin__JwtSigningKey, ...).
+/// </summary>
+public sealed class AdminAuthOptions
+{
+    public const string Section = "Admin";
+
+    /// <summary>Secret, at least 32 bytes. SEPARATE from Auth:JwtSigningKey. The same value locally and on Railway.</summary>
+    public string JwtSigningKey { get; set; } = string.Empty;
+
+    public string Issuer { get; set; } = "lumind-api";
+
+    public string Audience { get; set; } = "lumind-admin";
+
+    /// <summary>Audience of the short "password accepted, TOTP pending" token.</summary>
+    public string MfaAudience { get; set; } = "lumind-admin-mfa";
+
+    public int AccessTokenMinutes { get; set; } = 10;
+
+    public int MfaTokenMinutes { get; set; } = 5;
+
+    /// <summary>Idle limit: the sliding lifetime of the refresh token.</summary>
+    public int IdleMinutes { get; set; } = 30;
+
+    /// <summary>Absolute limit of one sign-in, however often it is refreshed.</summary>
+    public int AbsoluteSessionHours { get; set; } = 8;
+
+    /// <summary>Password attempts per client IP within <see cref="LoginWindowSeconds"/>.</summary>
+    public int LoginAttempts { get; set; } = 5;
+
+    public int LoginWindowSeconds { get; set; } = 300;
+
+    public int TotpAttempts { get; set; } = 5;
+
+    public int TotpWindowSeconds { get; set; } = 300;
+
+    public int RefreshAttempts { get; set; } = 30;
+
+    public int RefreshWindowSeconds { get; set; } = 60;
+
+    /// <summary>Failures in a row after which the account is locked for a growing time.</summary>
+    public int LockAfterFailures { get; set; } = 5;
+
+    /// <summary>The longest lock (1, 2, 4, 8 … minutes, capped here).</summary>
+    public int LockMaxMinutes { get; set; } = 15;
+
+    public int PasswordMinLength { get; set; } = 14;
+
+    public int Pbkdf2Iterations { get; set; } = 310_000;
+
+    /// <summary>A conversation without an end and without activity for this long counts as abandoned.</summary>
+    public int AbandonedAfterHours { get; set; } = 24;
+
+    /// <summary>Gaps between consecutive messages shorter than this count as active time.</summary>
+    public int ActiveGapMinutes { get; set; } = 10;
+
+    public int MaxBulkCreate { get; set; } = 100;
+}
+
 public sealed class DocumentsOptions
 {
     public const string Section = "Documents";
@@ -142,5 +202,5 @@ public sealed class DatabaseOptions
     public const string Section = "Database";
 
     /// <summary>The schema version this build expects (the highest api/db script number).</summary>
-    public int ExpectedSchemaVersion { get; set; } = 2;
+    public int ExpectedSchemaVersion { get; set; } = 3;
 }

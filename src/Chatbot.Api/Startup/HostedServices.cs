@@ -14,6 +14,7 @@ public sealed class ConfigurationValidationService(
     PrivacyOptions privacy,
     DocumentsOptions documents,
     ChatOptions chat,
+    AdminAuthOptions adminOptions,
     ICrisisDetector crisisDetector,
     IHostEnvironment environment) : IHostedService
 {
@@ -35,7 +36,8 @@ public sealed class ConfigurationValidationService(
             configuration.GetConnectionString("Default"),
             configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [],
             requireDatabase: true,
-            production: environment.IsProduction());
+            production: environment.IsProduction(),
+            admin: adminOptions);
         if (problems.Count > 0)
         {
             throw new InvalidOperationException("Invalid configuration: " + string.Join(" ", problems));
@@ -71,6 +73,35 @@ public sealed class SchemaCheckService(IServiceScopeFactory scopes, ILogger<Sche
         catch (OperationCanceledException)
         {
             // shutting down
+        }
+    }
+}
+
+/// <summary>
+/// Logs one warning (no names, no counts of people) when no active admin exists: the panel cannot be signed in to, but the API
+/// itself runs. Read-only; does nothing when the schema is not at version 3 yet.
+/// </summary>
+public sealed class AdminStartupCheckService(IServiceScopeFactory scopes, ILogger<AdminStartupCheckService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var count = await scope.ServiceProvider.GetRequiredService<Chatbot.Infrastructure.Admin.AdminAccountService>().CountActiveAsync(stoppingToken);
+            if (count == 0)
+            {
+                logger.LogWarning("No active admin account exists: the admin panel cannot be signed in to. Create admins with the create-admin command (docs/yonetim-kilavuzu.md).");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // shutting down
+        }
+        catch (Exception ex)
+        {
+            // Typically the schema is not at version 3 yet (SchemaCheckService says so). Type only.
+            logger.LogInformation("The admin account check was skipped ({ExceptionType}).", ex.GetType().Name);
         }
     }
 }

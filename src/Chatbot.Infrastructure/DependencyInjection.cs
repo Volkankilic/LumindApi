@@ -31,11 +31,13 @@ public static class DependencyInjection
         if (environment?.IsDevelopment() == true)
         {
             services.AddScoped<DevTestParticipantService>();
+            services.AddScoped<DevTestAdminService>();
         }
 
         services.AddSingleton(TimeProvider.System);
 
         services.AddSingleton(sp => Bind<AuthOptions>(sp, AuthOptions.Section));
+        services.AddSingleton(sp => Bind<AdminAuthOptions>(sp, AdminAuthOptions.Section));
         services.AddSingleton(sp => Bind<DocumentsOptions>(sp, DocumentsOptions.Section));
         services.AddSingleton(sp => Bind<PrivacyOptions>(sp, PrivacyOptions.Section));
         services.AddSingleton(sp => Bind<ChatOptions>(sp, ChatOptions.Section));
@@ -55,6 +57,16 @@ public static class DependencyInjection
         services.AddScoped<Chatbot.Infrastructure.Retention.RetentionService>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IAuthService, AuthService>();
+
+        // Admin panel (phase 7, ADR 009).
+        services.AddSingleton(sp => new Chatbot.Infrastructure.Admin.AdminPasswordHasher(sp.GetRequiredService<AdminAuthOptions>().Pbkdf2Iterations));
+        services.AddSingleton<Chatbot.Infrastructure.Admin.AdminLoginTracker>();
+        services.AddScoped<Chatbot.Application.Admin.IAdminAuthService, Chatbot.Infrastructure.Admin.AdminAuthService>();
+        services.AddScoped<Chatbot.Application.Admin.IAdminAccess, Chatbot.Infrastructure.Admin.AdminAccess>();
+        services.AddScoped<Chatbot.Application.Admin.IAdminParticipantService, Chatbot.Infrastructure.Admin.AdminParticipantService>();
+        services.AddScoped<Chatbot.Application.Admin.IAdminStatsService, Chatbot.Infrastructure.Admin.AdminStatsService>();
+        services.AddScoped<Chatbot.Application.Admin.IAdminCrisisService, Chatbot.Infrastructure.Admin.AdminCrisisService>();
+        services.AddScoped<Chatbot.Infrastructure.Admin.AdminAccountService>();
         services.AddScoped<IParticipantAccess, ParticipantAccess>();
         services.AddScoped<IParticipantService, ParticipantService>();
         services.AddScoped<IConversationService, ConversationService>();

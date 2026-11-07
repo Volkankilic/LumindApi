@@ -89,6 +89,23 @@ public sealed class DevTestParticipantService(
         return new CreatedTestParticipant(participant.Id, code);
     }
 
+    /// <summary>
+    /// A participant created through the ADMIN panel by an end-to-end test (its label starts with "e2e-"; the panel refuses the
+    /// "itest-" prefix) is given an `itest-` label, so the normal cleanup can delete it. Anything else is refused: this can never
+    /// relabel (and so never delete) a real participant.
+    /// </summary>
+    public async Task AdoptAsync(Guid participantId, CancellationToken ct)
+    {
+        var participant = await db.Participants.FirstOrDefaultAsync(p => p.Id == participantId, ct) ?? throw AppException.NotFound();
+        if (participant.Label is null || !participant.Label.StartsWith("e2e-", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AppException("forbidden", 403);
+        }
+
+        participant.Label = NewLabel();
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>Deletes a test participant and everything that belongs to it, children first (foreign key order).</summary>
     public async Task DeleteAsync(Guid participantId, CancellationToken ct)
     {

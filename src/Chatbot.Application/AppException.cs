@@ -14,6 +14,10 @@ public static class ProblemCodes
     public const string InvalidCode = "invalid-code";
     public const string NotFound = "not-found";
     public const string Unauthorized = "unauthorized";
+    public const string InvalidCredentials = "invalid-credentials";
+    public const string Forbidden = "forbidden";
+    public const string InvalidTransition = "invalid-transition";
+    public const string LabelTaken = "label-taken";
 }
 
 /// <summary>
@@ -31,6 +35,14 @@ public sealed class AppException(string code, int statusCode, int? retryAfterSec
     public static AppException InvalidCode() => new(ProblemCodes.InvalidCode, 401);
 
     public static AppException Unauthorized() => new(ProblemCodes.Unauthorized, 401);
+
+    public static AppException InvalidCredentials() => new(ProblemCodes.InvalidCredentials, 401);
+
+    public static AppException Forbidden() => new(ProblemCodes.Forbidden, 403);
+
+    public static AppException InvalidTransition() => new(ProblemCodes.InvalidTransition, 409);
+
+    public static AppException LabelTaken() => new(ProblemCodes.LabelTaken, 409);
 
     public static AppException ConsentRequired() => new(ProblemCodes.ConsentRequired, 403);
 

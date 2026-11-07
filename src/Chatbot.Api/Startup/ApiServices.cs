@@ -6,6 +6,7 @@ using Chatbot.Api.Http;
 using Chatbot.Api.Security;
 using Chatbot.Application;
 using Chatbot.Application.Abstractions;
+using Chatbot.Application.Admin;
 using Chatbot.Application.Options;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -23,11 +24,15 @@ public static class ApiServices
     public const string AuthCodeLimiter = "auth-code";
     public const string AuthRefreshLimiter = "auth-refresh";
     public const string SendMessageLimiter = "send-message";
+    public const string AdminLoginLimiter = "admin-login";
+    public const string AdminTotpLimiter = "admin-totp";
+    public const string AdminRefreshLimiter = "admin-refresh";
     public const string CorsPolicy = "client";
 
     public static IServiceCollection AddApiServices(this IServiceCollection services)
     {
         services.AddSingleton<IAccessTokenIssuer, AccessTokenIssuer>();
+        services.AddSingleton<IAdminTokenIssuer, AdminTokenIssuer>();
 
         services.AddControllers()
             .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
@@ -52,7 +57,9 @@ public static class ApiServices
         services.AddOpenApi();
 
         // --- authentication: access JWT in the Authorization header
-        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer()
+            .AddJwtBearer(AdminSecurity.Scheme, _ => { }); // the admin panel: its own key and audience (ADR 009)
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<AuthOptions>((jwt, auth) =>
             {
@@ -75,14 +82,42 @@ public static class ApiServices
                 };
             });
 
-        // --- authorization: both policies are checked against the database on every request
+        services.AddOptions<JwtBearerOptions>(AdminSecurity.Scheme)
+            .Configure<AdminAuthOptions>((jwt, admin) =>
+            {
+                jwt.MapInboundClaims = false;
+                jwt.RequireHttpsMetadata = false;
+                jwt.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = admin.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = admin.Audience,
+                    ValidateLifetime = true,
+                    RequireExpirationTime = true,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(admin.JwtSigningKey)),
+                    ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+                    ClockSkew = TimeSpan.FromSeconds(10),
+                    NameClaimType = JwtRegisteredClaimNames.Sub,
+                    RoleClaimType = System.Security.Claims.ClaimTypes.Role,
+                };
+            });
+
+        // --- authorization: all policies are checked against the database on every request
         services.AddScoped<IAuthorizationHandler, ParticipantAccessHandler>();
+        services.AddScoped<IAuthorizationHandler, AdminAccessHandler>();
         services.AddSingleton<IAuthorizationMiddlewareResultHandler, ProblemAuthorizationResultHandler>();
         services.AddAuthorizationBuilder()
             .AddPolicy(Policies.Authenticated, p => p
                 .RequireAuthenticatedUser()
                 .RequireRole(Roles.Participant)
                 .AddRequirements(new ParticipantAccessRequirement(RequireOnboarded: false)))
+            .AddPolicy(AdminSecurity.Policy, p => p
+                .AddAuthenticationSchemes(AdminSecurity.Scheme)
+                .RequireAuthenticatedUser()
+                .RequireRole(AdminSecurity.Role)
+                .AddRequirements(new AdminAccessRequirement()))
             .AddPolicy(Policies.OnboardedParticipant, p => p
                 .RequireAuthenticatedUser()
                 .RequireRole(Roles.Participant)
@@ -122,6 +157,38 @@ public static class ApiServices
                 });
             });
 
+            // Admin sign-in: tighter than the participant one (an account, not a code), the TOTP step on its own budget.
+            limiter.AddPolicy(AdminLoginLimiter, http =>
+            {
+                var admin = http.RequestServices.GetRequiredService<AdminAuthOptions>();
+                return RateLimitPartition.GetFixedWindowLimiter("admin-login:" + ClientKey(http), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = admin.LoginAttempts,
+                    Window = TimeSpan.FromSeconds(admin.LoginWindowSeconds),
+                    QueueLimit = 0,
+                });
+            });
+            limiter.AddPolicy(AdminTotpLimiter, http =>
+            {
+                var admin = http.RequestServices.GetRequiredService<AdminAuthOptions>();
+                return RateLimitPartition.GetFixedWindowLimiter("admin-totp:" + ClientKey(http), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = admin.TotpAttempts,
+                    Window = TimeSpan.FromSeconds(admin.TotpWindowSeconds),
+                    QueueLimit = 0,
+                });
+            });
+            limiter.AddPolicy(AdminRefreshLimiter, http =>
+            {
+                var admin = http.RequestServices.GetRequiredService<AdminAuthOptions>();
+                return RateLimitPartition.GetFixedWindowLimiter("admin-refresh:" + ClientKey(http), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = admin.RefreshAttempts,
+                    Window = TimeSpan.FromSeconds(admin.RefreshWindowSeconds),
+                    QueueLimit = 0,
+                });
+            });
+
             // Sending messages: per participant.
             limiter.AddPolicy(SendMessageLimiter, http =>
             {
@@ -154,6 +221,7 @@ public static class ApiServices
 
         services.AddHostedService<ConfigurationValidationService>();
         services.AddHostedService<SchemaCheckService>();
+        services.AddHostedService<AdminStartupCheckService>();
         services.AddHostedService<RetentionHostedService>();
         return services;
     }
