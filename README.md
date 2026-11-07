@@ -4,7 +4,7 @@ Kanser tanısı yeni konmuş yetişkinlere (18+) **Travma Bilgili Bakım** temel
 
 Clean Architecture: `Chatbot.Api` (ASP.NET Core, controller tabanlı) · `Chatbot.Application` · `Chatbot.Domain` · `Chatbot.Infrastructure` · `Chatbot.Tests` (xUnit).
 
-> **Durum (Faz 2):** Veri modeli, kod ile kimlik doğrulama, onboarding (aydınlatma, rıza, rumuz, silme) ve SSE ile akan sohbet uç noktaları vardır. Yapay zekâ bu API'de **yoktur**; yanıtları `FakeChatResponder` üretir (istemci mock'undaki şablonların sunucuya taşınmış hâli). Kriz algılama bu fazda gerçek **değildir**: varsayılan `NoopCrisisDetector` hiçbir şeyi işaretlemez; yalnızca Development'ta, açıkça işaretli anahtar kelimeli bir yer tutucu çalışır (gerçek algılama Faz 5).
+> **Durum (Faz 2):** Veri modeli, kod ile kimlik doğrulama, onboarding (aydınlatma, rıza, rumuz, silme) ve SSE ile akan sohbet uç noktaları vardır. Yapay zekâ bu API'de **yoktur**; yanıtları `FakeChatResponder` üretir (istemci mock'undaki şablonların sunucuya taşınmış hâli). Kriz algılama (Faz 5) **kural tabanlıdır** (`RuleCrisisDetector`, Türkçe, dış servis yok; `docs/kriz/kriz-algilama.md`) ve her ortamda kayıtlıdır; Production'da gerçek algılayıcı olmadan API başlamaz. İfade listesi **taslaktır, klinik uzman onayı bekler**; Development'ta eski anahtar kelime yer tutucusu onunla birlikte çalışır.
 
 > **Uyarı:** Bu depo özel (private) bir araştırma projesine aittir. Sistem özel nitelikli kişisel veri (sağlık) işleyecektir. **Railway yalnızca sentetik demo verisi içindir;** gerçek hasta verisi için API ve veritabanının **Türkiye'de barındırılan** bir ortama taşınması gerekir.
 

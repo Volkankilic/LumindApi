@@ -41,7 +41,7 @@ public class CrisisReviewSheetTests
                 $"| {p.Id} | {p.CategoryId} — {Cell(p.CategoryTitle)} | {Cell(p.Pattern)} ({gap}) | {Cell(p.Example)} | {Cell(p.Reason)} | {Cell(p.Risk)} |  |");
         }
 
-        return table.ToString().TrimEnd();
+        return table.ToString().Replace("\r\n", "\n").TrimEnd();
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class CrisisReviewSheetTests
     {
         var path = SheetPath();
         var expected = BuildTable(CrisisLexicon.LoadEmbedded());
-        var content = File.ReadAllText(path, Encoding.UTF8);
+        var content = File.ReadAllText(path, Encoding.UTF8).Replace("\r\n", "\n"); // git may check the file out with CRLF
         var start = content.IndexOf(Begin, StringComparison.Ordinal);
         var stop = content.IndexOf(End, StringComparison.Ordinal);
         Assert.True(start >= 0 && stop > start, "the generated-table markers are missing from the review sheet");
