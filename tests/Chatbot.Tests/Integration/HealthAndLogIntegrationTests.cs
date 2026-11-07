@@ -42,6 +42,13 @@ public class HealthAndLogIntegrationTests(IntegrationHost host) : IClassFixture<
         Assert.DoesNotContain("99", text, StringComparison.Ordinal);
         Assert.DoesNotContain("api/db", text, StringComparison.Ordinal);
         // The operator still learns what to do, from the log.
+        // The startup check runs in the background against the remote database, so the line can arrive after the health answer.
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && !ahead.Logs.Rendered().Any(line => line.Contains("Apply the scripts in api/db/", StringComparison.Ordinal)))
+        {
+            await Task.Delay(100);
+        }
+
         Assert.Contains(ahead.Logs.Rendered(), line => line.Contains("Apply the scripts in api/db/", StringComparison.Ordinal));
     }
 

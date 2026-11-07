@@ -182,7 +182,7 @@ public class EncryptionKeyValidationTests
                 });
             var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
             var text = ex.ToString();
-            Assert.Contains("Privacy:DataEncryptionKeys", text, StringComparison.Ordinal);
+            Assert.True(text.Contains("Privacy:DataEncryptionKeys", StringComparison.Ordinal), $"{environment}: {text[..Math.Min(text.Length, 1500)]}");
             Assert.DoesNotContain(TestEncryption.KeyBase64, text, StringComparison.Ordinal);
         }
     }
