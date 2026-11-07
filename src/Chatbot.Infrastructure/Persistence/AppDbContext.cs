@@ -109,7 +109,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.ActorId, x.Timestamp }).HasDatabaseName("ix_audit_logs_actor_time");
             // 002_retention_indexes.sql: the retention job deletes audit rows by age.
             e.HasIndex(x => x.Timestamp).HasDatabaseName("ix_audit_logs_timestamp");
-            e.HasIndex(x => x.Timestamp).HasFilter("actor_type = 'Anonymous'").HasDatabaseName("ix_audit_logs_anonymous_timestamp");
+            // A second index on the same column needs a model name of its own, otherwise EF folds it into the one above.
+            e.HasIndex(x => x.Timestamp, "ix_audit_logs_anonymous_timestamp").HasFilter("actor_type = 'Anonymous'").HasDatabaseName("ix_audit_logs_anonymous_timestamp");
         });
 
         ApplySnakeCase(b);
