@@ -29,6 +29,32 @@ public static class TestDataCleanup
         }
     }
 
+    /// <summary>
+    /// Deletes `itest-` admins: their acknowledgements, audit rows (as actor or target), then the admin (sessions and recovery codes
+    /// cascade). Refuses a user name that does not start with `itest-`.
+    /// </summary>
+    public static async Task DeleteAdminsAsync(AppDbContext db, IReadOnlyCollection<Guid> adminIds)
+    {
+        if (adminIds.Count == 0)
+        {
+            return;
+        }
+
+        var found = await db.AdminUsers.AsNoTracking().Where(a => adminIds.Contains(a.Id)).Select(a => new { a.Id, a.Username }).ToListAsync();
+        var foreign = found.Where(a => !a.Username.StartsWith(LabelPrefix, StringComparison.Ordinal)).ToList();
+        if (foreign.Count > 0)
+        {
+            throw new InvalidOperationException($"Refusing to delete {foreign.Count} admin(s) whose user name does not start with {LabelPrefix}.");
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync();
+        await db.CrisisAcknowledgements.Where(a => adminIds.Contains(a.AdminId)).ExecuteDeleteAsync();
+        await db.AuditLogs.Where(a => (a.ActorId != null && adminIds.Contains(a.ActorId.Value))
+            || (a.TargetId != null && adminIds.Contains(a.TargetId.Value))).ExecuteDeleteAsync();
+        await db.AdminUsers.Where(a => adminIds.Contains(a.Id) && a.Username.StartsWith(LabelPrefix)).ExecuteDeleteAsync();
+        await tx.CommitAsync();
+    }
+
     /// <summary>Deletes the given test participants, children first (foreign key order): consent, audit, tokens, conversations (messages cascade), then the participants.</summary>
     public static async Task DeleteParticipantsAsync(AppDbContext db, IReadOnlyCollection<Guid> participantIds)
     {

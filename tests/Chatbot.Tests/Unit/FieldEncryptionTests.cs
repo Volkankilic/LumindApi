@@ -460,12 +460,12 @@ public class BypassPathGuardTests
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i];
-                if (Regex.IsMatch(line, @"\.Select(Many)?\(") && Regex.IsMatch(line, @"\b\w+\.(Content|Nickname)\b"))
+                if (Regex.IsMatch(line, @"\.Select(Many)?\(") && Regex.IsMatch(line, @"\b\w+\.(Content|Nickname|TotpSecret)\b"))
                 {
                     offenders.Add($"{System.IO.Path.GetFileName(path)}:{i + 1}");
                 }
 
-                if (Regex.IsMatch(line, @"=>\s*new\b") && Regex.IsMatch(line, @"\b\w+\.(Content|Nickname)\b") && !Regex.IsMatch(line, @"\bMessageDto\b"))
+                if (Regex.IsMatch(line, @"=>\s*new\b") && Regex.IsMatch(line, @"\b\w+\.(Content|Nickname|TotpSecret)\b") && !Regex.IsMatch(line, @"\bMessageDto\b"))
                 {
                     offenders.Add($"{System.IO.Path.GetFileName(path)}:{i + 1}");
                 }
@@ -536,7 +536,7 @@ public class BypassPathGuardTests
     [Fact]
     public void AuditRows_AreOnlyDeletedByTheRetentionJob_AndTheDevelopmentTestCleanup()
     {
-        var allowed = new HashSet<string>(StringComparer.Ordinal) { "RetentionService.cs", "DevTestParticipantService.cs" };
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "RetentionService.cs", "DevTestParticipantService.cs", "DevTestAdminService.cs" };
         var offenders = new List<string>();
         foreach (var (path, lines) in Sources())
         {

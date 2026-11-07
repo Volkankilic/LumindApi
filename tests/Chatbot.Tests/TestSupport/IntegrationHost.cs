@@ -38,6 +38,7 @@ public sealed class IntegrationHost : IAsyncLifetime
     private static readonly SecretHasher Hasher = new(TestAuth, TestPrivacy);
 
     private readonly List<Guid> _participants = [];
+    private readonly List<Guid> _admins = [];
     private readonly object _gate = new();
 
     public ApiFactory Factory { get; private set; } = null!;
@@ -86,6 +87,59 @@ public sealed class IntegrationHost : IAsyncLifetime
         return new TestParticipant(participant.Id, code);
     }
 
+    /// <summary>
+    /// An `itest-` admin with TOTP and five recovery codes, straight into the database (low password cost, so the tests stay quick).
+    /// Deleted at the end; real admin accounts are never touched.
+    /// </summary>
+    public async Task<TestAdmin> CreateAdminAsync()
+    {
+        var username = "itest-" + Guid.NewGuid().ToString("N")[..12];
+        var password = "Test-" + Guid.NewGuid().ToString("N");
+        var secret = Chatbot.Infrastructure.Admin.Totp.NewSecret();
+        var recovery = Enumerable.Range(0, 5).Select(_ => Chatbot.Infrastructure.Admin.RecoveryCodes.New()).ToList();
+        var admin = new AdminUser
+        {
+            Id = Guid.CreateVersion7(),
+            Username = username,
+            PasswordHash = new Chatbot.Infrastructure.Admin.AdminPasswordHasher(1000).Hash(password),
+            TotpSecret = Chatbot.Infrastructure.Admin.Base32.Encode(secret),
+            TotpEnabled = true,
+            Status = AdminStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        await using var db = TestDatabase.NewContext();
+        db.AdminUsers.Add(admin);
+        foreach (var code in recovery)
+        {
+            db.AdminRecoveryCodes.Add(new AdminRecoveryCode { Id = Guid.CreateVersion7(), AdminId = admin.Id, CodeHash = Hasher.HashCode(code) });
+        }
+
+        await db.SaveChangesAsync();
+        lock (_gate)
+        {
+            _admins.Add(admin.Id);
+        }
+
+        return new TestAdmin(admin.Id, username, password, secret, recovery);
+    }
+
+    /// <summary>
+    /// A participant created through the admin API has an ordinary label (the API refuses `itest-`). The test renames it at once, so the
+    /// teardown can find and delete it with the same rules as every other test participant.
+    /// </summary>
+    public async Task AdoptAsync(Guid participantId)
+    {
+        await using var db = TestDatabase.NewContext();
+        var participant = await db.Participants.SingleAsync(p => p.Id == participantId);
+        participant.Label = TestDataCleanup.NewLabel();
+        await db.SaveChangesAsync();
+        lock (_gate)
+        {
+            _participants.Add(participantId);
+        }
+    }
+
     public static string NewCode()
     {
         var chars = new char[ParticipantCode.Length];
@@ -111,12 +165,21 @@ public sealed class IntegrationHost : IAsyncLifetime
             ids = [.. _participants];
         }
 
+        Guid[] admins;
+        lock (_gate)
+        {
+            admins = [.. _admins];
+        }
+
         await using var db = TestDatabase.NewContext();
         await TestDataCleanup.DeleteParticipantsAsync(db, ids);
+        await TestDataCleanup.DeleteAdminsAsync(db, admins);
     }
 }
 
 public sealed record TestParticipant(Guid Id, string Code);
+
+public sealed record TestAdmin(Guid Id, string Username, string Password, byte[] Secret, IReadOnlyList<string> RecoveryCodes);
 
 /// <summary>A signed-in test client: bearer token plus the refresh cookie, handled by hand so rotation can be tested exactly.</summary>
 public sealed class Session(HttpClient client, string accessToken, string? refreshCookie, JsonElement state)

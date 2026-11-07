@@ -52,6 +52,7 @@ public sealed class ApiFactory(
     {
         ["Auth:JwtSigningKey"] = new string('j', 48),
         ["Auth:CodePepper"] = new string('p', 48),
+        ["Admin:JwtSigningKey"] = new string('a', 48),
         ["Privacy:IpHashKey"] = new string('i', 48),
         [$"Privacy:DataEncryptionKeys:{TestEncryption.KeyId}"] = TestEncryption.KeyBase64,
         ["Privacy:CurrentDataEncryptionKeyId"] = TestEncryption.KeyId,
@@ -86,6 +87,9 @@ public sealed class ApiFactory(
             merged["ConnectionStrings:Default"] = TestDatabase.ConnectionString;
             merged["Auth:CodeAttempts"] = "10000";
             merged["Auth:CookieSecure"] = "false";
+            merged["Admin:LoginAttempts"] = "10000";
+            merged["Admin:TotpAttempts"] = "10000";
+            merged["Admin:RefreshAttempts"] = "10000";
         }
 
         foreach (var (key, value) in settings ?? [])
