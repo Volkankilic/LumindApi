@@ -22,7 +22,8 @@ public sealed class MarkerCrisisDetector : ICrisisDetector
 {
     public const string Marker = "KRIZ-TEST-IFADESI";
 
-    public bool IsCrisis(string text) => text.Contains(Marker, StringComparison.Ordinal);
+    public CrisisAssessment Assess(string text) =>
+        text.Contains(Marker, StringComparison.Ordinal) ? CrisisAssessment.Of(CrisisCategory.Unknown) : CrisisAssessment.None;
 }
 
 /// <summary>
@@ -55,6 +56,9 @@ public sealed class IntegrationHost : IAsyncLifetime
     public ApiFactory NewFactory(Dictionary<string, string?>? settings = null) =>
         new(stubServices: false, realDatabase: true, settings: settings, configure: services =>
             services.Replace(ServiceDescriptor.Singleton<ICrisisDetector>(new MarkerCrisisDetector())));
+
+    /// <summary>The real pipeline with the real, rule based crisis detector (the default host swaps in the marker detector).</summary>
+    public ApiFactory NewFactoryWithTheRealCrisisDetector() => new(stubServices: false, realDatabase: true);
 
     public static string Document => "0.1-taslak";
 

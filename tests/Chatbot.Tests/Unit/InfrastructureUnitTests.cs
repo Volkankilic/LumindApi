@@ -10,6 +10,7 @@ using Chatbot.Domain.Entities;
 using Chatbot.Domain.Rules;
 using Chatbot.Infrastructure;
 using Chatbot.Infrastructure.Chat;
+using Chatbot.Infrastructure.Chat.Crisis;
 using Chatbot.Infrastructure.Dev;
 using Chatbot.Infrastructure.Security;
 using Chatbot.Infrastructure.Seed;
@@ -39,6 +40,7 @@ internal static class TestServices
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(config);
         services.AddSingleton<IHostEnvironment>(new FakeEnvironment(environment));
+        services.AddLogging(); // the host provides it; the crisis detectors log through it
         services.AddInfrastructure();
         return services.BuildServiceProvider();
     }
@@ -212,22 +214,27 @@ public class OptionsValidatorTests
 public class EnvironmentRulesTests
 {
     [Fact]
-    public void InDevelopment_TheKeywordCrisisDetector_IsRegistered()
+    public void InDevelopment_TheRealDetector_RunsTogetherWithTheKeywordStandIn()
     {
         using var provider = TestServices.Build(Environments.Development);
-        Assert.IsType<DevKeywordCrisisDetector>(provider.GetRequiredService<ICrisisDetector>());
+        var detector = provider.GetRequiredService<ICrisisDetector>();
+        var failSafe = Assert.IsType<FailSafeCrisisDetector>(detector);
+        Assert.IsType<CompositeCrisisDetector>(failSafe.Inner);
+        Assert.True(detector.IsProductionGrade);
     }
 
     [Theory]
     [InlineData("Production")]
     [InlineData("Staging")]
     [InlineData("Testing")]
-    public void OutsideDevelopment_TheCrisisDetectorIsTheNoopOne_NeverTheKeywordStandIn(string environment)
+    public void OutsideDevelopment_TheCrisisDetectorIsTheRuleBasedOne_NeverTheKeywordStandInOrTheNoopOne(string environment)
     {
         using var provider = TestServices.Build(environment);
         var detector = provider.GetRequiredService<ICrisisDetector>();
-        Assert.IsType<NoopCrisisDetector>(detector);
-        Assert.False(detector.IsCrisis("intihar kendime zarar yaşamak istemiyorum ölmek istiyorum"));
+        var failSafe = Assert.IsType<FailSafeCrisisDetector>(detector);
+        Assert.IsType<RuleCrisisDetector>(failSafe.Inner);
+        Assert.True(detector.IsProductionGrade);
+        Assert.True(detector.IsCrisis("Artık ölmek istiyorum"));
     }
 
     [Fact]

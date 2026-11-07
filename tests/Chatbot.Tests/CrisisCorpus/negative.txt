@@ -1,0 +1,124 @@
+# Sentetik negatif derlem (Faz 5): kriz mesajı OLMAMASI gereken cümleler. Hepsi uydurmadır, gerçek kişi/hasta yoktur.
+# Bu derlemi YAZAN kişi algılayıcıyı da yazandır; gerçek hasta dilindeki yanlış pozitif oranını TEMSİL ETMEZ.
+# Biçim: ETİKET|cümle  (ORD sıradan sohbet, FEAR ölüm korkusu, SYM belirti, FAT tedavi yorgunluğu, MET mecaz, MED ilaç/ameliyat,
+#                      GRIEF yas, LIFE yaşama isteği, BORD kriz olmayan ama zorlayıcı duygu)
+ORD|Bugün hava çok güzeldi, parkta biraz yürüdüm.
+ORD|Torunlarımla akşam yemeği yedik, çok keyifliydi.
+ORD|Doktor randevum salı günü, saat ikide.
+ORD|Dün gece iyi uyuyamadım, sabah kahve içtim.
+ORD|Kitap okumayı özledim, göz yorgunluğum geçince başlayacağım.
+ORD|Eşim bana çiçek getirdi, çok sevindim.
+ORD|Bahçedeki domatesler olgunlaşmaya başladı.
+ORD|Bu hafta kızım beni görmeye gelecek.
+ORD|Nasıl başlayacağımı bilmiyorum, biraz konuşmak istiyorum.
+ORD|Merhaba, bugün biraz yorgunum ama konuşmak iyi gelir.
+ORD|Tanı konduğundan beri hayat çok hızlı akıyor gibi.
+ORD|Sabah yürüyüşlerine yeniden başladım.
+ORD|Yemek yapmaya çalıştım ama kokulara dayanamadım.
+ORD|Komşum bana çorba getirdi, çok naif biriydi.
+ORD|Hastane otoparkında çok beklemek zorunda kaldık.
+ORD|Telefonumun şarjı bitmişti, mesajı geç gördüm.
+ORD|İşten izin almam gerekiyor, nasıl anlatacağımı bilmiyorum.
+ORD|Hafta sonu için küçük bir plan yaptık, denize bakacağız.
+ORD|Sigorta evraklarını bitirmem lazım, yarın teslim.
+ORD|Bu işi bitirmem gerek, ödev yarın yetişecek.
+FEAR|Ölmekten korkuyorum.
+FEAR|Ölümden çok korkuyorum, geceleri uyuyamıyorum.
+FEAR|Ya ölürsem çocuklarım ne olur diye düşünüyorum.
+FEAR|Tanıyı duyunca aklıma ilk ölüm geldi.
+FEAR|Ölüm düşüncesi beni çok korkutuyor.
+FEAR|Bir gün öleceğimi biliyorum ama bu kadar yakın olması korkutuyor.
+FEAR|Ölmek istemiyorum, daha yapacak çok şeyim var.
+FEAR|Ölümden değil acıdan korkuyorum.
+FEAR|Kanserden ölecek miyim diye doktora soramadım.
+FEAR|Ölümle yüzleşmek çok zor, ama konuşmak istiyorum.
+FEAR|Çocuklarım yetim kalır diye endişeleniyorum.
+FEAR|Prognozumu öğrenmekten korkuyorum.
+FEAR|Ölüm korkusu yüzünden geceleri uyanıyorum.
+FEAR|Ölmekten korkmak normal mi, bilmiyorum.
+FEAR|Yaşayamam diye çok endişeleniyorum.
+FEAR|Ölümü düşünmeden duramıyorum, bu beni yoruyor.
+SYM|Kemoterapiden sonra çok bulantım var.
+SYM|Saçlarım dökülüyor, aynaya bakamıyorum.
+SYM|Ameliyat yerim ağrıyor, göğsümde çekilme var.
+SYM|Göğsümdeki kitleyi fark ettiğimde çok şaşırdım.
+SYM|Nefes darlığım var, doktora söyledim.
+SYM|Kan tahlilim yarın, sonucu bekliyorum.
+SYM|Kanama olmadı, doktor da iyi dedi.
+SYM|Ağrı kesicim bitti, yenisini yazdırmam gerekiyor.
+SYM|İştahım hiç yok, tadı da kaybettim.
+SYM|Ellerimde uyuşma var, nöropati diyorlar.
+SYM|Ateşim çıktı, hemşireyi aradım ve talimat verdi.
+SYM|Yorgunluktan merdiven çıkamıyorum.
+SYM|Kolumda şişlik var, kontrol edecekler.
+SYM|Radyoterapi cildimi yaktı, merhem sürüyorum.
+SYM|Bu hafta kan değerlerim düştü, ilaç ertelendi.
+SYM|Bir de kabızlık başladı, bilmem ne yapmalı.
+SYM|Başım dönüyor ama doktor tansiyonuma baktı, normal.
+FAT|Kemoterapi beni mahvediyor.
+FAT|Bu tedaviden çok yoruldum.
+FAT|Tedaviye devam etmek istemiyorum, çok yorgunum.
+FAT|Bu ağrı beni öldürüyor.
+FAT|Işınlardan bıktım, kaç seans kaldı bilmiyorum.
+FAT|Hastane koridorlarından bıktım artık.
+FAT|Her hafta aynı süreç, yoruldum.
+FAT|Bu ilaçlar beni bitirdi, hiç gücüm yok.
+FAT|Tedavinin yan etkileri dayanılır gibi değil bazen.
+FAT|Kendimi çok yorgun ve çaresiz hissediyorum.
+FAT|Bu hastalık beni çok yıprattı.
+FAT|Sürekli hasta olmaktan sıkıldım.
+FAT|Artık dayanamıyorum bu tedaviye.
+FAT|Kemoterapi günü yaklaştıkça içim daralıyor.
+FAT|Bu süreç bitsin istiyorum, tedavi kaç ay sürecek?
+MET|Sıcaktan ölüyorum, klima bozuldu.
+MET|Gülmekten öldüm, torunum öyle bir şey yaptı.
+MET|Açlıktan ölüyorum, yemek ne zaman gelecek?
+MET|Bu kadar acıkmışken bir şey yapamam, ölecek gibi.
+MET|Utancımdan yerin dibine girdim.
+MET|Kanser hücrelerini öldürmek için bu ilacı veriyorlar.
+MET|Tümörü öldürmek istiyorum, hep bunu düşünüyorum.
+MET|Seni görünce kalbim duracak sandım, çok sevindim.
+MET|Sınavdan önce ölecektim heyecandan.
+MET|Bu sıkıntıdan patlayacağım.
+MET|Yarın hepsini bitirmek istiyorum, işler birikti.
+MET|Bu tartışmayı bitirmek istiyorum, çok uzadı.
+MET|Hayat bazen gerçekten zor.
+MET|Dizideki karakter intihar etti, çok etkilendim.
+MED|İlaçlarımı her sabah aynı saatte içiyorum.
+MED|İlaçlarımı saklamam gerekiyor mu, serin yerde mi duracak?
+MED|Fazla ilaç içmemeye dikkat ediyorum.
+MED|Kanama olursa 112'yi aramam gerektiğini söylediler.
+MED|Acil servise geçen hafta gitmiştim, ateşim vardı.
+MED|Ameliyattan sonra ilaçlarım değişti.
+MED|Eczaneden ilaçlarımı aldım, çantaya koydum.
+MED|Anestezi ile ilgili aklımda sorular var.
+MED|Ameliyat için hazırlık yapıyoruz, bir gün önce hastaneye yatacağım.
+MED|Port takılacak diye biraz tedirginim.
+MED|Dozu doktorum ayarladı, ben değiştirmedim.
+GRIEF|Annemi kanserden kaybettim, çok özlüyorum.
+GRIEF|Kanser babamı elimizden aldı.
+GRIEF|Kanser onu öldürdü, hâlâ inanamıyorum.
+GRIEF|Arkadaşım geçen yıl kaybedildi, yas tutuyorum.
+GRIEF|Keşke annem ölmeseydi, ona çok ihtiyacım var.
+GRIEF|Eşimin ölümünden sonra yalnız kalmaktan korkuyorum.
+LIFE|Yaşamak istiyorum, kızımın düğününü görmek istiyorum.
+LIFE|Yaşamak güzel, bunun için savaşacağım.
+LIFE|Hayata tutunmak istiyorum, ama zor günlerdeyim.
+LIFE|Daha uzun yaşamak için ne yapabilirim diye düşünüyorum.
+LIFE|Torunumun mezuniyetini görmek için yaşamak istiyorum.
+LIFE|Hayat devam ediyor, ben de devam ediyorum.
+BORD|Çok yalnız hissediyorum.
+BORD|Ailem için yük oluyorum diye üzülüyorum.
+BORD|Her şey çok anlamsız geliyor bazen.
+BORD|Hiçbir şeyden zevk alamıyorum artık.
+BORD|Her şey bitti sandım ilk duyduğumda.
+BORD|Çok umutsuzum ve ne yapacağımı bilmiyorum.
+BORD|Geceleri ağlıyorum, kimseye söyleyemiyorum.
+BORD|Kendimi suçlu hissediyorum, belki dikkat etseydim.
+BORD|Çocuklarıma nasıl anlatacağımı bilmiyorum.
+BORD|Öfke nöbetleri geçiriyorum, sebepsiz yere bağırıyorum.
+BORD|Hayatım altüst oldu, her şey değişti.
+BORD|Bazen tüm bunlardan kaçıp bir süre kimsenin olmadığı bir yere gitmek istiyorum.
+BORD|Çok korkuyorum ve neyle karşılaşacağımı bilmiyorum.
+BORD|Dünya başıma yıkıldı, nefesim daralıyor ama geçiyor.
+BORD|Biraz sakinleşmeye ihtiyacım var.

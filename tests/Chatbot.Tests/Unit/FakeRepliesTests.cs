@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Chatbot.Application.Chat;
 using Chatbot.Infrastructure.Chat;
 
 namespace Chatbot.Tests.Unit;
@@ -152,24 +153,26 @@ public class CrisisTextTests
     [InlineData("ölmek istiyorum")]
     [InlineData("KENDİME ZARAR vermek istiyorum")]
     public void TheDevDetector_RecognisesTheFewListedPhrases(string text) =>
-        Assert.True(new DevKeywordCrisisDetector().IsCrisis(text));
+        Assert.True(new DevKeywordCrisisDetector().Assess(text).IsCrisis);
 
     [Fact]
     public void TheDevDetector_IgnoresOrdinaryText() =>
-        Assert.False(new DevKeywordCrisisDetector().IsCrisis("Bugün çok yorgunum"));
+        Assert.False(new DevKeywordCrisisDetector().Assess("Bugün çok yorgunum").IsCrisis);
 
     [Fact]
-    public void TheNoopDetector_NeverFlagsAnything()
+    public void TheNoopDetector_NeverFlagsAnything_AndIsNotProductionGrade()
     {
         var detector = new NoopCrisisDetector();
-        Assert.False(detector.IsCrisis("intihar"));
-        Assert.False(detector.IsCrisis("kendime zarar"));
+        Assert.False(detector.Assess("intihar").IsCrisis);
+        Assert.False(detector.Assess("kendime zarar").IsCrisis);
+        Assert.False(((ICrisisDetector)detector).IsProductionGrade);
+        Assert.False(((ICrisisDetector)new DevKeywordCrisisDetector()).IsProductionGrade);
     }
 
     [Fact]
     public void TheSafeReply_FollowsTheCrisisProtocol_EmpathySafetyProfessionalHelp112()
     {
-        var text = new CrisisResponseProvider().GetReply();
+        var text = new CrisisResponseProvider().GetReply(CrisisAssessment.Unavailable);
         Assert.Contains("Güvende olman çok önemli", text, StringComparison.Ordinal);
         Assert.Contains("sağlık profesyoneline başvur", text, StringComparison.Ordinal);
         Assert.Contains("112", text, StringComparison.Ordinal);

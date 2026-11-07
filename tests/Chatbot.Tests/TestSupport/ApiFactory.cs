@@ -114,6 +114,7 @@ public sealed class ApiFactory(
             services.Replace(ServiceDescriptor.Singleton<IParticipantService>(Participants));
             services.Replace(ServiceDescriptor.Singleton<IConversationService>(Conversations));
             services.Replace(ServiceDescriptor.Singleton<IChatService>(Chat));
+            configure?.Invoke(services);
         });
     }
 }

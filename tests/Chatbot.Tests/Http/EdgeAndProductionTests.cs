@@ -1,7 +1,11 @@
 using System.Net;
+using Chatbot.Application.Chat;
 using Chatbot.Application.Options;
+using Chatbot.Infrastructure.Chat;
 using Chatbot.Infrastructure.Security;
 using Chatbot.Tests.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Chatbot.Tests.Http;
 
@@ -143,6 +147,35 @@ public class ProductionStartupTests
 
         var text = string.Join(" ", Enumerable.Range(0, 1).Select(_ => ex.ToString()));
         Assert.Contains("Auth:CookieSecure must be true in Production", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InProduction_TheNoopCrisisDetector_StopsTheApplication_WithAClearMessage_AndNoSecret()
+    {
+        using var factory = new ApiFactory(
+            "Production",
+            configure: services => services.Replace(ServiceDescriptor.Singleton<ICrisisDetector>(new NoopCrisisDetector())));
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            using var client = factory.CreateClient();
+            await client.GetAsync("/api/health");
+        });
+
+        var text = ex.ToString();
+        Assert.Contains("a production-grade (rule based) crisis detector is required in Production", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(TestEncryption.KeyBase64, text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Testing")]
+    [InlineData("Development")]
+    public async Task OutsideProduction_TheCheckDoesNotApply_SoTestHostsWithTheirOwnDetectorStillStart(string environment)
+    {
+        using var factory = new ApiFactory(
+            environment,
+            configure: services => services.Replace(ServiceDescriptor.Singleton<ICrisisDetector>(new NoopCrisisDetector())));
+        var response = await factory.CreateClient().GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]

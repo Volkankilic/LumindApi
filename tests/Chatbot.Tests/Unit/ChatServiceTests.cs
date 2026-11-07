@@ -5,6 +5,7 @@ using Chatbot.Application.Options;
 using Chatbot.Domain;
 using Chatbot.Domain.Entities;
 using Chatbot.Infrastructure.Chat;
+using Chatbot.Infrastructure.Chat.Crisis;
 using Chatbot.Infrastructure.Dev;
 
 namespace Chatbot.Tests.Unit;
@@ -63,9 +64,12 @@ internal sealed class MemoryChatStore : IChatStore
         return Task.CompletedTask;
     }
 
-    public Task MarkCrisisAsync(Guid messageId, CancellationToken ct)
+    public List<(Guid ParticipantId, Guid ConversationId, Guid MessageId)> CrisisMarks { get; } = [];
+
+    public Task MarkCrisisAsync(Guid participantId, Guid conversationId, Guid messageId, CancellationToken ct)
     {
         Messages.Single(m => m.Id == messageId).IsCrisis = true;
+        CrisisMarks.Add((participantId, conversationId, messageId));
         return Task.CompletedTask;
     }
 
@@ -305,6 +309,50 @@ public class ChatServiceTests
         var events = await Collect(rig.Send("intihar"));
         Assert.DoesNotContain(events, e => e is ChatEvent.Crisis);
         Assert.Equal(1, rig.Responder.Calls);
+        Assert.Empty(rig.Store.CrisisMarks);
+    }
+
+    [Fact]
+    public async Task TheRuleBasedDetector_RunsInThePipeline_AndTheFlagIsWrittenOnce_WithTheOwnerAndTheConversation()
+    {
+        var rig = new Rig { Detector = RuleCrisisDetector.CreateDefault() };
+        var events = await Collect(rig.Send("Bazen ölmek istiyorum"));
+
+        Assert.Equal("accepted,crisis", Names(events.Take(2)));
+        Assert.Equal(0, rig.Responder.Calls);
+        var mark = Assert.Single(rig.Store.CrisisMarks);
+        Assert.Equal(rig.Store.OwnerId, mark.ParticipantId);
+        Assert.Equal(rig.Store.Conversation.Id, mark.ConversationId);
+        Assert.Equal(rig.Store.Messages.Single(m => m.Role == MessageRole.User).Id, mark.MessageId);
+    }
+
+    [Fact]
+    public async Task ReplayingACrisisMessage_StreamsTheCrisisAgain_ButWritesNoSecondFlagOrAuditEntry()
+    {
+        var rig = new Rig { Detector = RuleCrisisDetector.CreateDefault() };
+        await Collect(rig.Send("Bazen ölmek istiyorum"));
+        var replay = await Collect(rig.Send("Bazen ölmek istiyorum"));
+
+        Assert.Equal("accepted,crisis", Names(replay.Take(2)));
+        Assert.Single(rig.Store.CrisisMarks); // one flag (and so one audit entry) per message
+        Assert.Single(rig.Store.Messages, m => m.Role == MessageRole.User);
+    }
+
+    private sealed class ThrowingDetector : ICrisisDetector
+    {
+        public CrisisAssessment Assess(string text) => throw new InvalidOperationException("boom");
+    }
+
+    [Fact]
+    public async Task IfTheDetectorThrows_TheMessageCountsAsACrisis_AndTheResponderIsNotCalled()
+    {
+        var rig = new Rig { Detector = new ThrowingDetector() };
+        var events = await Collect(rig.Send("herhangi bir metin"));
+
+        Assert.Equal("accepted,crisis", Names(events.Take(2)));
+        Assert.Equal(0, rig.Responder.Calls);
+        Assert.Single(rig.Store.CrisisMarks);
+        Assert.True(rig.Store.Messages.Single(m => m.Role == MessageRole.User).IsCrisis);
     }
 
     // ---------------------------------------------------------------- errors AFTER accepted are events

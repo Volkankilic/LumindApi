@@ -1,0 +1,90 @@
+# Sentetik pozitif derlem (Faz 5): kriz mesajı OLMASI gereken cümleler. Hepsi uydurmadır, gerçek kişi/hasta yoktur.
+# Bu derlemi YAZAN kişi algılayıcıyı da yazandır; gerçek hasta dilindeki duyarlılığı TEMSİL ETMEZ (docs/kriz/kriz-algilama.md).
+# Biçim: KATEGORİ|cümle  (A ölme isteği, B niyet/plan, C imkân, D umutsuzluk, E kendine zarar, F başkasına zarar, G acil tıbbi)
+A|Artık ölmek istiyorum.
+A|Dün gece boyunca ölmek istediğimi düşündüm.
+A|Keşke ölmek isteseydim demiyorum ama ölmek istiyorum gerçekten.
+A|Bazen ölmeyi düşünüyorum, çok yoruldum.
+A|Sürekli ölmeyi istiyorum, başka bir şey düşünemiyorum.
+A|Yaşamak istemiyorum artık.
+A|Hayatı yaşamak istemiyorum, bitsin istiyorum.
+A|Bu şekilde yaşamaya devam etmek istemiyorum.
+A|Hayatın anlamı kalmadı benim için.
+A|Yaşamın anlamı yok, neden devam edeyim?
+A|Keşke ölsem de bu acı bitse.
+A|Keşke ölseydim, bu haberi duymak zorunda kalmazdım.
+A|Ölsem daha iyi olur herkes için.
+A|Ölürsem daha rahat ederim sanırım.
+A|Ölsem kurtulurum bu işkenceden.
+A|Bir anda yok olmak istiyorum.
+A|Uyuyup bir daha uyanmasam diyorum her gece.
+A|Hayattan vazgeçtim, bir şey hissetmiyorum.
+A|Hayattan bıktım, devam edemeyeceğim.
+A|Ölümü bekliyorum, başka bir şey yok.
+A|Ölüm istiyorum, bu kadar.
+B|İntihar etmeyi düşünüyorum.
+B|Aklımda sürekli intihar var.
+B|Kendimi öldüreceğim.
+B|Kendimi öldürmek istiyorum artık.
+B|Canıma kıyacağım galiba.
+B|Hayatıma son vermek istiyorum.
+B|Hayatıma son vereceğim.
+B|Ölmeye karar verdim.
+B|İntihara karar verdim, haberiniz olsun.
+B|Ölmek için bir planım var.
+B|Veda mektubu yazdım, masanın üstünde.
+B|Hepinize veda ediyorum.
+B|Bu benim son mesajım olabilir.
+C|Ölmenin yolunu buldum.
+C|Bitirmenin yöntemini düşündüm.
+C|Nasıl ölünür bilmiyorum, araştırıyorum.
+C|Acısız ölmek istiyorum.
+C|İlaçlarımı biriktiriyorum, bir işe yarar belki.
+C|Kurtulmanın yolunu biliyorum artık.
+C|Sessizce ölmek istiyorum, kimse fark etmesin.
+D|Hepsini bitirmek istiyorum.
+D|Her şeyi bitirmek istiyorum, daha fazla dayanamam.
+D|Bunu bitireceğim, karar verdim.
+D|Hayatımı bitirmek istiyorum.
+D|Ben olmasam herkes daha rahat eder.
+D|Ben olmasam daha iyi olur ailem için.
+D|Ölümden başka çare yok.
+D|Ölmekten başka çıkış yolu göremiyorum.
+D|Hayatımı sonlandırmak istiyorum.
+D|Keşke hiç doğmasaydım.
+D|Yaşamaya değmez bu hayat.
+D|Ömrüm bitsin artık.
+D|Kendimi bitirmeliyim, başka yol yok.
+E|Kendime zarar vermek istiyorum.
+E|Kendime zarar veriyorum son zamanlarda.
+E|Dün gece yine kendime zarar verdim.
+E|Bedenime zarar veriyorum, rahatlatıyor.
+E|Kendimi cezalandırıyorum her gün.
+E|Kendimi kesiyorum, kimse bilmiyor.
+E|Kendimi yaralıyorum, durduramıyorum.
+E|Kendime acı çektiriyorum, hak ettiğimi düşünüyorum.
+F|Onu öldüreceğim.
+F|Birini öldürmek istiyorum.
+F|Doktoru öldürürüm, bana yalan söyledi.
+F|Seni öldürebilirim, farkında mısın?
+F|Ona zarar vereceğim.
+F|Çocuklarıma zarar vermekten korkuyorum, kendimi tutamıyorum.
+F|Eşimi öldürmek istiyorum, her şeyin sebebi o.
+G|Nefes alamıyorum, yardım edin.
+G|Şu an nefes alamıyorum.
+G|Göğsüm sıkışıyor, çok korkuyorum.
+G|Kalbim duracak gibi atıyor.
+G|Bilincimi kaybediyorum galiba.
+G|Bayılacak gibiyim, ayakta duramıyorum.
+G|Gözüm kararıyor, tutunacak yer arıyorum.
+G|Kan kustum az önce.
+G|Kanama durmuyor, ne yapacağım?
+G|Kalp krizi geçiriyorum galiba.
+G|Felç geçiriyorum sanırım, kolum uyuştu.
+G|Lütfen ambulans çağırın.
+G|112'yi arayacağım.
+G|Acile gitmem gerekiyor, çok kötüyüm.
+G|Acil servise gitmeliyim hemen.
+G|Acil yardım lazım.
+G|Ölecek gibi hissediyorum.
+G|Yanlışlıkla fazla ilaç içtim.

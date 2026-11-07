@@ -1,0 +1,20 @@
+# Sentetik "zor" pozitifler: dolaylı, örtük ya da listede bulunmayan söyleyişler. Kural tabanlı sistem bunların çoğunu KAÇIRIR;
+# kaçırdığını bilmek için ayrı ölçülür. (Duyarlılık oranına KATILMAZ; ayrı raporlanır.) Hepsi uydurmadır.
+A|Bir sabah hiç uyanmamak en güzeli olurdu.
+A|Dünya bensiz de dönüyor, ne fark eder.
+A|Artık bu hayatta yerim yok gibi geliyor.
+A|Bitse de kurtulsam.
+B|Eşyalarımı dağıtmaya başladım, işim bitmek üzere.
+B|Çocuklara son kez sarılmak istedim, anlarsınız.
+B|Yarın sabaha kadar her şey çözülmüş olacak.
+C|Elimde yeterince şey var, yeter ki cesaret edeyim.
+C|Dolabın en üstündeki kutuyu ne zaman açacağımı düşünüyorum.
+D|Herkes bensiz daha mutlu olurdu.
+D|Sizin için yükten başka bir şey değilim.
+D|Her şey çok anlamsız, bir çıkış göremiyorum.
+E|Acı hissetmek bana iyi geliyor, kendimi bunun için buluyorum.
+G|Göğsümde müthiş bir baskı var, kolum da uyuşuyor.
+G|Nefesim kesiliyor, konuşamıyorum.
+G|Gözlerim karardı, düşeceğim sanki.
+G|Kusmuğumda kan vardı bu sabah.
+G|Çok fazla ilaç aldım yanlışlıkla.
