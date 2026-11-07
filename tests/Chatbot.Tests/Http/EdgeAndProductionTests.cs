@@ -138,30 +138,16 @@ public class ProductionStartupTests
     [Fact]
     public async Task InProduction_ASessionCookieThatIsNotSecure_StopsTheApplication_NamingTheSettingOnly()
     {
-        using var factory = new ApiFactory("Production", new() { ["Auth:CookieSecure"] = "false" });
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
-        {
-            using var client = factory.CreateClient();
-            await client.GetAsync("/api/health");
-        });
-
-        var text = string.Join(" ", Enumerable.Range(0, 1).Select(_ => ex.ToString()));
+        var text = await FailedStart.TextAsync(() => new ApiFactory("Production", new() { ["Auth:CookieSecure"] = "false" }));
         Assert.Contains("Auth:CookieSecure must be true in Production", text, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task InProduction_TheNoopCrisisDetector_StopsTheApplication_WithAClearMessage_AndNoSecret()
     {
-        using var factory = new ApiFactory(
+        var text = await FailedStart.TextAsync(() => new ApiFactory(
             "Production",
-            configure: services => services.Replace(ServiceDescriptor.Singleton<ICrisisDetector>(new NoopCrisisDetector())));
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
-        {
-            using var client = factory.CreateClient();
-            await client.GetAsync("/api/health");
-        });
-
-        var text = ex.ToString();
+            configure: services => services.Replace(ServiceDescriptor.Singleton<ICrisisDetector>(new NoopCrisisDetector()))));
         Assert.Contains("a production-grade (rule based) crisis detector is required in Production", text, StringComparison.Ordinal);
         Assert.DoesNotContain(TestEncryption.KeyBase64, text, StringComparison.Ordinal);
     }

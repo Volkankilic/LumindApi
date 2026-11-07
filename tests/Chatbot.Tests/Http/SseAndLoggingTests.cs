@@ -254,19 +254,11 @@ public class LoggingAndConfigurationTests
     public async Task MissingSecrets_StopTheApplication_WithAMessageThatNamesTheSettingNotItsValue()
     {
         const string tooShort = "SHORT-PEPPER-VALUE";
-        using var factory = new ApiFactory(settings: new()
+        var message = await FailedStart.TextAsync(() => new ApiFactory(settings: new()
         {
             ["Auth:CodePepper"] = tooShort,
             ["Auth:JwtSigningKey"] = null,
-        });
-
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
-        {
-            using var client = factory.CreateClient();
-            await client.GetAsync("/api/health");
-        });
-
-        var message = Flatten(ex);
+        }));
         Assert.Contains("Auth:CodePepper", message, StringComparison.Ordinal);
         Assert.Contains("Auth:JwtSigningKey", message, StringComparison.Ordinal);
         Assert.DoesNotContain(tooShort, message, StringComparison.Ordinal);
@@ -275,13 +267,8 @@ public class LoggingAndConfigurationTests
     [Fact]
     public async Task ACorsWildcard_StopsTheApplication()
     {
-        using var factory = new ApiFactory(settings: new() { ["Cors:AllowedOrigins:0"] = "*" });
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
-        {
-            using var client = factory.CreateClient();
-            await client.GetAsync("/api/health");
-        });
-        Assert.Contains("Cors:AllowedOrigins", Flatten(ex), StringComparison.Ordinal);
+        var text = await FailedStart.TextAsync(() => new ApiFactory(settings: new() { ["Cors:AllowedOrigins:0"] = "*" }));
+        Assert.Contains("Cors:AllowedOrigins", text, StringComparison.Ordinal);
     }
 
     private static string Flatten(Exception ex)

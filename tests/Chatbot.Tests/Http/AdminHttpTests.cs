@@ -339,13 +339,8 @@ public class AdminHttpTests
     {
         foreach (var value in new[] { string.Empty, new string('j', 48) })
         {
-            using var rig = new Rig(settings: new() { ["Admin:JwtSigningKey"] = value });
-            var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
-            {
-                using var client = rig.Client();
-                await client.GetAsync("/api/health");
-            });
-            var text = ex.ToString();
+            var key = value;
+            var text = await FailedStart.TextAsync(() => new ApiFactory(settings: new() { ["Admin:JwtSigningKey"] = key }));
             Assert.Contains("Admin:JwtSigningKey", text, StringComparison.Ordinal);
             Assert.DoesNotContain(new string('j', 48), text, StringComparison.Ordinal);
         }

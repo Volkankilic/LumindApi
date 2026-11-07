@@ -167,21 +167,20 @@ public class EncryptionKeyValidationTests
     public void AKeyIdThatCouldBreakTheStoredPrefix_IsRefused(string id) => Assert.False(OptionsValidator.IsValidKeyId(id));
 
     [Fact]
-    public void TheApplicationRefusesToStart_WithoutAKey_InEveryEnvironment_AndTheMessageHasNoValue()
+    public async Task TheApplicationRefusesToStart_WithoutAKey_InEveryEnvironment_AndTheMessageHasNoValue()
     {
         foreach (var environment in new[] { "Production", "Development", "Testing" })
         {
             // The settings of the test host are merged over the defaults, so the key is blanked rather than removed.
-            using var factory = new ApiFactory(
-                environment: environment,
+            var env = environment;
+            var text = await FailedStart.TextAsync(() => new ApiFactory(
+                environment: env,
                 settings: new()
                 {
                     [$"Privacy:DataEncryptionKeys:{TestEncryption.KeyId}"] = "",
                     ["Privacy:CurrentDataEncryptionKeyId"] = "",
                     ["Auth:CookieSecure"] = "true",
-                });
-            var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
-            var text = ex.ToString();
+                }));
             Assert.True(text.Contains("Privacy:DataEncryptionKeys", StringComparison.Ordinal), $"{environment}: {text[..Math.Min(text.Length, 1500)]}");
             Assert.DoesNotContain(TestEncryption.KeyBase64, text, StringComparison.Ordinal);
         }
