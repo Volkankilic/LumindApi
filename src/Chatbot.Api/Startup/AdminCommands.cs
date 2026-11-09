@@ -227,7 +227,7 @@ public static class AdminCommands
 
     private static string? ReadNewPassword(IAdminConsole console)
     {
-        var first = console.ReadSecret("Parola (en az 14 karakter): ");
+        var first = console.ReadSecret("Parola (en az 8 karakter): ");
         var second = console.ReadSecret("Parola (tekrar): ");
         if (string.IsNullOrEmpty(first) || !string.Equals(first, second, StringComparison.Ordinal))
         {
@@ -254,7 +254,7 @@ public static class AdminCommands
     {
         AdminAccountProblem.BadUsername => "Kullanıcı adı 3-32 karakter olmalı: küçük harfle başlar; küçük harf, rakam, nokta, tire, alt çizgi.",
         AdminAccountProblem.UsernameTaken => "Bu kullanıcı adı zaten var.",
-        AdminAccountProblem.WeakPassword => "Parola en az 14 karakter olmalı ve kullanıcı adından farklı olmalı.",
+        AdminAccountProblem.WeakPassword => "Parola en az 8 karakter olmalı ve kullanıcı adından farklı olmalı.",
         AdminAccountProblem.WrongCode => "Kod doğrulanamadı.",
         AdminAccountProblem.NotFound => "Böyle bir yönetici yok.",
         _ => string.Empty,

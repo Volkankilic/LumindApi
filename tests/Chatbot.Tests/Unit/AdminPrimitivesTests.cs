@@ -163,15 +163,24 @@ public class AdminPasswordTests
 
     [Theory]
     [InlineData("short", "bob", true)]
-    [InlineData("exactly-14-char", "bob", false)]
-    [InlineData("0123456789abc", "bob", true)]
+    [InlineData("1234567", "bob", true)]
+    [InlineData("12345678", "bob", false)]
+    [InlineData("a-much-longer-password-than-the-old-upper-limit-of-nothing", "bob", false)]
     [InlineData("arastirmaci-1-extra", "arastirmaci-1", false)]
+    [InlineData("arastirmaci", "ARASTIRMACI", true)]
     public void ThePasswordRule_IsLengthAndNotTheUserName(string password, string user, bool problem) =>
-        Assert.Equal(problem, AdminPasswordHasher.PasswordProblem(password, user, 14) is not null);
+        Assert.Equal(problem, AdminPasswordHasher.PasswordProblem(password, user, 8) is not null);
+
+    [Fact]
+    public void TheDefaultMinimum_IsEight_AndThereIsNoUpperLimit()
+    {
+        Assert.Equal(8, new AdminAuthOptions().PasswordMinLength);
+        Assert.Null(AdminPasswordHasher.PasswordProblem(new string('x', 5000), "bob", 8));
+    }
 
     [Fact]
     public void ThePassword_MayNotEqualTheUserName_EvenInAnotherCase() =>
-        Assert.NotNull(AdminPasswordHasher.PasswordProblem("Arastirmaci-Bir-Ad", "arastirmaci-bir-ad", 14));
+        Assert.NotNull(AdminPasswordHasher.PasswordProblem("Arastirmaci-Bir-Ad", "arastirmaci-bir-ad", 8));
 }
 
 public class AdminRecoveryAndLockTests
@@ -328,7 +337,7 @@ public class AdminOptionsTests
     {
         var weak = Good;
         weak.Pbkdf2Iterations = 1000;
-        weak.PasswordMinLength = 8;
+        weak.PasswordMinLength = 7;
         weak.IdleMinutes = 60 * 9;
         weak.MaxBulkCreate = 10_000;
         weak.Audience = Auth.Audience;

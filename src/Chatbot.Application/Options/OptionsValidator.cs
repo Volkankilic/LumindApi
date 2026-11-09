@@ -134,9 +134,9 @@ public static class OptionsValidator
             problems.Add("Admin:LockAfterFailures and Admin:LockMaxMinutes must be positive.");
         }
 
-        if (admin.PasswordMinLength < 14)
+        if (admin.PasswordMinLength < 8)
         {
-            problems.Add("Admin:PasswordMinLength must not be below 14.");
+            problems.Add("Admin:PasswordMinLength must not be below 8.");
         }
 
         if (admin.Pbkdf2Iterations < 210_000)

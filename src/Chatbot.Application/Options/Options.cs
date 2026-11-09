@@ -93,7 +93,7 @@ public sealed class AdminAuthOptions
     /// <summary>The longest lock (1, 2, 4, 8 … minutes, capped here).</summary>
     public int LockMaxMinutes { get; set; } = 15;
 
-    public int PasswordMinLength { get; set; } = 14;
+    public int PasswordMinLength { get; set; } = 8;
 
     public int Pbkdf2Iterations { get; set; } = 310_000;
 
