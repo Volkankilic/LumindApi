@@ -178,7 +178,16 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+            if (_options.UsesApiKeyHeader)
+            {
+                // The key travels in the configured header ONLY: no Authorization header is sent in this mode.
+                request.Headers.TryAddWithoutValidation(_options.AuthHeaderName, _options.ApiKey);
+            }
+            else
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+            }
+
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
             using (var connect = CancellationTokenSource.CreateLinkedTokenSource(ct))

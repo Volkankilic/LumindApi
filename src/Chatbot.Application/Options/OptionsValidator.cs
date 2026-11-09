@@ -122,6 +122,22 @@ public static class OptionsValidator
             problems.Add("Llm:ApiKey is missing (set it with user-secrets or the Llm__ApiKey environment variable).");
         }
 
+        else if (llm.ApiKey.Any(char.IsControl) || llm.ApiKey != llm.ApiKey.Trim())
+        {
+            // A line break would let the key value start a second header; a stray space is a copy mistake.
+            problems.Add("Llm:ApiKey must not contain line breaks, control characters or leading/trailing spaces.");
+        }
+
+        if (!llm.UsesApiKeyHeader && !string.Equals(llm.AuthScheme, LlmOptions.BearerAuth, StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add("Llm:AuthScheme must be Bearer or ApiKeyHeader.");
+        }
+
+        if (!LlmEndpointPolicy.IsValidHeaderName(llm.AuthHeaderName))
+        {
+            problems.Add("Llm:AuthHeaderName must be a plain HTTP header name (letters, digits and - _ . only; not Authorization, Content-Type, Host or similar).");
+        }
+
         if (string.IsNullOrWhiteSpace(llm.Model))
         {
             problems.Add("Llm:Model is missing.");

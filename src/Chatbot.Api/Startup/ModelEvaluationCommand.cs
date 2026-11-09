@@ -133,6 +133,9 @@ public static class ModelEvaluationCommand
         // ---- the confirmation: the texts leave this machine
         var host = new Uri(llm.BaseUrl!.Trim()).Host;
         console.WriteLine($"Hedef model sunucusu: {host}");
+        console.WriteLine(llm.UsesApiKeyHeader
+            ? $"Anahtar başlığı: {llm.AuthHeaderName} (Authorization gönderilmez)"
+            : "Anahtar başlığı: Authorization: Bearer");
         console.WriteLine($"Modeller: {string.Join(", ", models)}");
         console.WriteLine($"Senaryo sayısı: {file.Scenarios!.Count}. Yalnızca SENTETİK içerik gönderilir; sonuçlar yerelde kalır.");
         var answer = console.ReadLine("Devam etmek için tam olarak 'evet' yazın: ");

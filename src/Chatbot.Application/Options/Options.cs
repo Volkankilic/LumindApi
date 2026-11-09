@@ -222,6 +222,18 @@ public sealed class LlmOptions
     /// <summary>Secret. user-secrets / environment variable only.</summary>
     public string? ApiKey { get; set; }
 
+    /// <summary>How the key is sent: <c>Bearer</c> (default: <c>Authorization: Bearer &lt;key&gt;</c>) or <c>ApiKeyHeader</c> (<c>&lt;AuthHeaderName&gt;: &lt;key&gt;</c> and NO Authorization header).</summary>
+    public string AuthScheme { get; set; } = BearerAuth;
+
+    /// <summary>The header that carries the key when <see cref="AuthScheme"/> is <c>ApiKeyHeader</c>. Not used with <c>Bearer</c>.</summary>
+    public string AuthHeaderName { get; set; } = "X-API-Key";
+
+    public const string BearerAuth = "Bearer";
+
+    public const string ApiKeyHeaderAuth = "ApiKeyHeader";
+
+    public bool UsesApiKeyHeader => string.Equals(AuthScheme, ApiKeyHeaderAuth, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Host names (no scheme, no wildcard) the base URL may point to. The application does not start when the base URL's host is not listed.</summary>
     public string[] AllowedHosts { get; set; } = [];
 

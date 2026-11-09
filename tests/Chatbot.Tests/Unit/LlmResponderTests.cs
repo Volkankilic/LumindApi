@@ -12,7 +12,7 @@ namespace Chatbot.Tests.Unit;
 /// <summary>An HttpMessageHandler that never leaves the process: it records the requests and answers from a script.</summary>
 internal sealed class FakeLlmHandler(Func<int, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
 {
-    public List<(Uri? Uri, HttpMethod Method, string? Authorization, string? Accept, string Body)> Requests { get; } = [];
+    public List<(Uri? Uri, HttpMethod Method, string? Authorization, string? Accept, string Body, Dictionary<string, string> Headers)> Requests { get; } = [];
 
     public int Count => Requests.Count;
 
@@ -21,7 +21,10 @@ internal sealed class FakeLlmHandler(Func<int, CancellationToken, Task<HttpRespo
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-        Requests.Add((request.RequestUri, request.Method, request.Headers.Authorization?.ToString(), request.Headers.Accept.ToString(), body));
+        // Every header that was sent (name -> value), request and content headers: what a provider (or a proxy) would see.
+        var headers = request.Headers.Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>())
+            .ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
+        Requests.Add((request.RequestUri, request.Method, request.Headers.Authorization?.ToString(), request.Headers.Accept.ToString(), body, headers));
         Tokens.Add(cancellationToken);
         return await respond(Requests.Count, cancellationToken);
     }
@@ -218,6 +221,114 @@ public class LlmResponderTests
         Assert.Equal(("assistant", "ilk yanıt"), messages[2]);
         Assert.Equal(("user", UserText), messages[3]);
         Assert.Equal(prompt.Version, responder.PromptVersion);
+    }
+
+    // ---------------------------------------------------------------- how the key is sent
+
+    [Fact]
+    public async Task ByDefault_TheKeyGoesAsABearerToken_AndNoApiKeyHeaderIsSent()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler);
+        await Read(responder);
+
+        var request = handler.Requests.Single();
+        Assert.Equal("Bearer " + Key, request.Authorization);
+        Assert.False(request.Headers.ContainsKey("X-API-Key"));
+        Assert.Equal("Bearer " + Key, request.Headers["Authorization"]);
+    }
+
+    [Fact]
+    public async Task InApiKeyHeaderMode_TheKeyGoesInXApiKey_AndNoAuthorizationHeaderIsSent()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.AuthScheme = "ApiKeyHeader");
+        await Read(responder);
+
+        var request = handler.Requests.Single();
+        Assert.Equal(Key, request.Headers["X-API-Key"]);
+        Assert.Null(request.Authorization);
+        Assert.False(request.Headers.ContainsKey("Authorization"));
+        // the key is in that one header and nowhere else (not in the URL, not in the body, not in another header)
+        Assert.DoesNotContain(Key, request.Uri!.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, request.Body, StringComparison.Ordinal);
+        Assert.Equal(["X-API-Key"], request.Headers.Where(h => h.Value.Contains(Key, StringComparison.Ordinal)).Select(h => h.Key).ToArray());
+        Assert.Contains("text/event-stream", request.Accept, StringComparison.Ordinal); // the rest of the request is unchanged
+        Assert.Equal("https://llm.example.test/v1/chat/completions", request.Uri.ToString());
+    }
+
+    [Theory]
+    [InlineData("apikeyheader")]
+    [InlineData("APIKEYHEADER")]
+    public async Task TheSchemeName_IsNotCaseSensitive(string scheme)
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.AuthScheme = scheme);
+        await Read(responder);
+
+        Assert.Equal(Key, handler.Requests.Single().Headers["X-API-Key"]);
+        Assert.False(handler.Requests.Single().Headers.ContainsKey("Authorization"));
+    }
+
+    [Fact]
+    public async Task TheHeaderNameIsConfigurable_AndOnlyUsedInApiKeyHeaderMode()
+    {
+        var custom = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (withHeader, _, _) = Make(custom, o =>
+        {
+            o.AuthScheme = "ApiKeyHeader";
+            o.AuthHeaderName = "X-Evren-Key";
+        });
+        await Read(withHeader);
+        Assert.Equal(Key, custom.Requests.Single().Headers["X-Evren-Key"]);
+        Assert.False(custom.Requests.Single().Headers.ContainsKey("X-API-Key"));
+
+        // with Bearer the header name is ignored: no such header is sent
+        var bearer = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (withBearer, _, _) = Make(bearer, o => o.AuthHeaderName = "X-Evren-Key");
+        await Read(withBearer);
+        Assert.False(bearer.Requests.Single().Headers.ContainsKey("X-Evren-Key"));
+        Assert.Equal("Bearer " + Key, bearer.Requests.Single().Authorization);
+    }
+
+    [Fact]
+    public async Task TheRetry_SendsTheSameHeaderAgain_AndStillNoAuthorization()
+    {
+        var handler = new FakeLlmHandler((n, _) => Done(n == 1 ? FakeLlmHandler.Status(HttpStatusCode.ServiceUnavailable) : Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.AuthScheme = "ApiKeyHeader");
+        await Read(responder);
+
+        Assert.Equal(2, handler.Count);
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal(Key, r.Headers["X-API-Key"]);
+            Assert.False(r.Headers.ContainsKey("Authorization"));
+        });
+    }
+
+    [Theory]
+    [InlineData("X API Key")]
+    [InlineData("X-API-Key\r\nX-Evil: 1")]
+    [InlineData("X-API-Key:")]
+    [InlineData("Authorization")]
+    [InlineData("")]
+    public void ABadHeaderName_StopsTheResponderFromBeingBuilt_WithoutNamingTheValue(string name)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            new OpenAiCompatibleChatResponder(
+                LlmHttpClient.Create(new FakeLlmHandler((_, _) => throw new InvalidOperationException())),
+                Options(o =>
+                {
+                    o.AuthScheme = "ApiKeyHeader";
+                    o.AuthHeaderName = name;
+                }),
+                SystemPromptText.LoadEmbedded(),
+                new ListLogger<OpenAiCompatibleChatResponder>(),
+                development: false));
+
+        Assert.Contains("Llm:AuthHeaderName", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("X-Evil", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -595,19 +706,38 @@ public class LlmResponderTests
             (_, _) => Done(FakeLlmHandler.Sse(new ScriptedStream(": x\n\n", new ScriptedStream.Fail()))),
         };
 
-        foreach (var respond in failures)
+        // the same failures in both ways of sending the key: Authorization: Bearer and the X-API-Key header
+        foreach (var scheme in new[] { "Bearer", "ApiKeyHeader" })
         {
-            var handler = new FakeLlmHandler(respond);
-            var (responder, log, prompt) = Make(handler);
-
-            var ex = await Assert.ThrowsAsync<ModelUnavailableException>(() => Read(responder));
-
-            var everything = ex + " | " + ex.Message + " | " + string.Join(" | ", log.Lines);
-            foreach (var secret in new[] { "SECRET", UserText, Key, "GIZLI-MESAJ", prompt.Text[..40], "llm.example.test" })
+            foreach (var respond in failures)
             {
-                Assert.DoesNotContain(secret, everything, StringComparison.Ordinal);
+                var handler = new FakeLlmHandler(respond);
+                var (responder, log, prompt) = Make(handler, o => o.AuthScheme = scheme);
+
+                var ex = await Assert.ThrowsAsync<ModelUnavailableException>(() => Read(responder));
+
+                var everything = ex + " | " + ex.Message + " | " + string.Join(" | ", log.Lines);
+                foreach (var secret in new[] { "SECRET", UserText, Key, "GIZLI-MESAJ", prompt.Text[..40], "llm.example.test", "X-API-Key" })
+                {
+                    Assert.DoesNotContain(secret, everything, StringComparison.Ordinal);
+                }
             }
         }
+    }
+
+    [Fact]
+    public async Task InApiKeyHeaderMode_AProviderThatEchoesTheHeaderBack_StillLeaksNothingToTheExceptionOrTheLog()
+    {
+        // a 4xx whose body repeats the received header (some gateways do): the body is never read
+        var handler = new FakeLlmHandler((_, _) => Done(FakeLlmHandler.Status(HttpStatusCode.Forbidden, "invalid X-API-Key: " + Key)));
+        var (responder, log, _) = Make(handler, o => o.AuthScheme = "ApiKeyHeader");
+
+        var ex = await Assert.ThrowsAsync<ModelUnavailableException>(() => Read(responder));
+
+        var everything = ex + " | " + string.Join(" | ", log.Lines);
+        Assert.DoesNotContain(Key, everything, StringComparison.Ordinal);
+        Assert.Equal(ModelFailure.Rejected, ex.Failure);
+        Assert.Equal(403, ex.StatusCode);
     }
 
     [Fact]

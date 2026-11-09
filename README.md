@@ -77,6 +77,21 @@ dotnet user-secrets set "Llm:Model" "<model-adı>" --project src/Chatbot.Api
 dotnet user-secrets set "Llm:Provider" "OpenAiCompatible" --project src/Chatbot.Api
 ```
 
+**Anahtarın gönderilme biçimi:** `Llm:AuthScheme` = `Bearer` (varsayılan: `Authorization: Bearer <anahtar>`) ya da `ApiKeyHeader` (`<Llm:AuthHeaderName>: <anahtar>`; **Authorization başlığı gönderilmez**). `Llm:AuthHeaderName` yalnızca `ApiKeyHeader` seçilince kullanılır, varsayılanı `X-API-Key`. Geçersiz şema ya da başlık adı (boşluk, satır sonu, `:`, ASCII dışı; `Authorization`, `Content-Type`, `Host`, `Accept`, `Cookie` gibi istemcinin kendi başlıkları) ve satır sonu/baş-son boşluk içeren anahtar API'yi **başlatmaz**; ileti yalnızca ayar adını söyler.
+
+EVREN örneği (anahtar yalnızca user-secrets'ta; değerleri sohbete yazmayın):
+
+```powershell
+cd api
+dotnet user-secrets set "Llm:BaseUrl" "https://evren-llmapi.ssyz.org.tr/v1" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:AllowedHosts:0" "evren-llmapi.ssyz.org.tr" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:AuthScheme" "ApiKeyHeader" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:ApiKey" "<ANAHTAR>" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:Model" "<model-adı>" --project src/Chatbot.Api
+```
+
+**Doğrulanmadı:** EVREN'in `stream: true` (SSE) ve `max_tokens` alan adı desteği henüz denenmedi (elinizdeki örnek istek bunları içermiyor). İstemci `stream: true` gönderir; EVREN akışı desteklemiyorsa ilk değerlendirme çalışmasında hata görülür (`unavailable`, `BadAnswer` ya da zaman aşımı). Jeton sınırı alan adı farklıysa `Llm:MaxTokensParameter`, sınır hiç istenmiyorsa `Llm:MaxTokens`'ı boş bırakmak yeter. Akışsız yedek mod henüz yoktur ([ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md)).
+
 `Llm:BaseUrl` ana makinesi `Llm:AllowedHosts` listesinde değilse (ya da https değilse) API **başlamaz**; ileti yalnızca ayar adını söyler. İsteğe bağlı ayarlar ve varsayılanları: `Temperature` 0,6, `MaxTokens` 400 (`MaxTokensParameter`: alan adı, varsayılan `max_tokens`), `FirstTokenTimeoutSeconds` 25, `IdleTimeoutSeconds` 20, `TotalTimeoutSeconds` 120, `MaxRetries` 2, `RetryBaseDelayMs` 500, `MaxConcurrentRequests` 8. Railway'de ad biçimi `Llm__ApiKey`, `Llm__AllowedHosts__0` vb. Ayrıntı: [ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md).
 
 ### Model değerlendirme komutu (yerel, sentetik veri)

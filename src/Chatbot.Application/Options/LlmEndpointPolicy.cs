@@ -46,6 +46,17 @@ public static class LlmEndpointPolicy
         return problems;
     }
 
+    private static readonly string[] ReservedHeaders = ["Authorization", "Content-Type", "Content-Length", "Host", "Accept", "Cookie", "Transfer-Encoding", "Connection"];
+
+    /// <summary>
+    /// A header that may carry the key: 1-64 letters, digits, <c>- _ .</c> (no space, colon, line break or non-ASCII), and none of the
+    /// headers the client sets itself. The key must not be able to replace Authorization, the body type or the host.
+    /// </summary>
+    public static bool IsValidHeaderName(string? name) =>
+        name is { Length: > 0 and <= 64 }
+        && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')
+        && !ReservedHeaders.Contains(name, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Letters, digits and <c>. _ - : / @</c> (providers write names like "org/model:tag"), at most 100 characters.</summary>
     public static bool IsValidModelName(string name) =>
         name.Length is > 0 and <= 100 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' or ':' or '/' or '@');

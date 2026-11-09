@@ -427,6 +427,67 @@ public class ModelEvaluationCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task InApiKeyHeaderMode_TheKeyGoesInXApiKeyOnly_AndNothingThatIsPrintedOrWrittenHasIt()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:AuthScheme"] = "ApiKeyHeader");
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal(Key, r.Headers["X-API-Key"]);
+            Assert.Null(r.Authorization);
+            Assert.False(r.Headers.ContainsKey("Authorization"));
+        });
+        Assert.Contains("X-API-Key", console.All, StringComparison.Ordinal); // the header NAME is shown, never the value
+        Assert.DoesNotContain(Key, console.All, StringComparison.Ordinal);
+        foreach (var name in new[] { "results.jsonl", "summary.md" })
+        {
+            Assert.DoesNotContain(Key, File.ReadAllText(Path.Combine(OutsideRepo, name)), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task InApiKeyHeaderMode_AProviderThatEchoesTheKey_LeavesItOutOfTheRowsAndTheConsole()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:AuthScheme"] = "ApiKeyHeader");
+        var handler = new FakeLlmHandler((_, _) => Task.FromResult(FakeLlmHandler.Status(HttpStatusCode.Forbidden, "invalid X-API-Key " + Key)));
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        var everything = console.All + string.Join("\n", ResultLines(OutsideRepo)) + File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.DoesNotContain(Key, everything, StringComparison.Ordinal);
+        Assert.Contains("Rejected 403", everything, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ABadHeaderNameOrScheme_StopsTheCommand_BeforeAnythingIsAskedOrSent()
+    {
+        foreach (var (key, value) in new[] { ("Llm:AuthScheme", "Basic"), ("Llm:AuthHeaderName", "X Bad Name") })
+        {
+            var (services, env) = Build(tweak: s =>
+            {
+                s["Llm:AuthScheme"] = "ApiKeyHeader";
+                s[key] = value;
+            });
+            var handler = OkHandler();
+            var console = new ScriptedConsole("evet");
+
+            var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+            Assert.Equal(1, code);
+            Assert.Equal(0, handler.Count);
+            Assert.Contains(key, console.All, StringComparison.Ordinal);
+            Assert.DoesNotContain(Key, console.All, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task AnotherPromptFile_CanBeTried_AndItsVersionIsRecorded()
     {
         var (services, env) = Build();

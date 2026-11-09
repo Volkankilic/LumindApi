@@ -147,6 +147,139 @@ public class LlmConfigurationTests
         Assert.All(problems, p => Assert.DoesNotContain(SecretValue, p, StringComparison.Ordinal));
     }
 
+    // ---------------------------------------------------------------- how the key is sent (AuthScheme, AuthHeaderName)
+
+    [Fact]
+    public void TheDefaultScheme_IsBearer_AndTheDefaultHeaderNameIsXApiKey()
+    {
+        var options = new LlmOptions();
+        Assert.Equal("Bearer", options.AuthScheme);
+        Assert.Equal("X-API-Key", options.AuthHeaderName);
+        Assert.False(options.UsesApiKeyHeader);
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(), development: false));
+    }
+
+    [Theory]
+    [InlineData("Bearer")]
+    [InlineData("bearer")]
+    [InlineData("ApiKeyHeader")]
+    [InlineData("apikeyheader")]
+    public void AValidScheme_Passes(string scheme) =>
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(o => o.AuthScheme = scheme), development: false));
+
+    [Theory]
+    [InlineData("Basic")]
+    [InlineData("ApiKey")]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("Bearer X-API-Key")]
+    public void AnUnknownScheme_IsRefused_NamingTheSettingNotTheValue(string scheme)
+    {
+        var problems = OptionsValidator.ValidateLlm(Real(o => o.AuthScheme = scheme), development: false);
+
+        Assert.Contains(problems, p => p.Contains("Llm:AuthScheme", StringComparison.Ordinal));
+        Assert.All(problems, p => Assert.DoesNotContain("Basic", p, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("X-API-Key")]
+    [InlineData("x-api-key")]
+    [InlineData("X-Evren-Key")]
+    [InlineData("Api_Key.v2")]
+    public void AValidHeaderName_Passes(string name) =>
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(o =>
+        {
+            o.AuthScheme = "ApiKeyHeader";
+            o.AuthHeaderName = name;
+        }), development: false));
+
+    [Theory]
+    [InlineData("X API Key")] // a space
+    [InlineData("X-API-Key\r\nX-Evil: 1")] // a line break: header injection
+    [InlineData("X-API-Key\n")]
+    [InlineData("X-API-Key:")]
+    [InlineData("X-API-Key\t")]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("Anahtar-Ü")] // not ASCII
+    [InlineData("Authorization")] // the key must not take the place of a header the client owns
+    [InlineData("authorization")]
+    [InlineData("Content-Type")]
+    [InlineData("Host")]
+    [InlineData("Cookie")]
+    public void ABadHeaderName_IsRefused_NamingTheSettingNotTheValue(string name)
+    {
+        var problems = OptionsValidator.ValidateLlm(Real(o =>
+        {
+            o.AuthScheme = "ApiKeyHeader";
+            o.AuthHeaderName = name;
+        }), development: false);
+
+        Assert.Contains(problems, p => p.Contains("Llm:AuthHeaderName", StringComparison.Ordinal));
+        Assert.All(problems, p =>
+        {
+            Assert.DoesNotContain("X-Evil", p, StringComparison.Ordinal);
+            Assert.DoesNotContain(SecretValue, p, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void ABadHeaderName_IsRefusedInBearerModeToo_SoALeftoverCannotSurpriseALaterSwitch() =>
+        Assert.Contains(
+            OptionsValidator.ValidateLlm(Real(o => o.AuthHeaderName = "X Bad"), development: false),
+            p => p.Contains("Llm:AuthHeaderName", StringComparison.Ordinal));
+
+    [Theory]
+    [InlineData("sk-abc\r\nX-Evil: 1")]
+    [InlineData("sk-abc\n")]
+    [InlineData(" sk-abc")]
+    [InlineData("sk-abc ")]
+    [InlineData("sk-\tabc")]
+    public void AKeyWithALineBreakOrStraySpaces_IsRefused_WithoutRepeatingIt(string key)
+    {
+        var problems = OptionsValidator.ValidateLlm(Real(o => o.ApiKey = key), development: false);
+
+        Assert.Contains(problems, p => p.Contains("Llm:ApiKey", StringComparison.Ordinal));
+        Assert.All(problems, p =>
+        {
+            Assert.DoesNotContain("sk-abc", p, StringComparison.Ordinal);
+            Assert.DoesNotContain("X-Evil", p, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void TheEvrenSettings_Pass_AndAreBoundFromConfiguration()
+    {
+        // The documented example: base URL + allow list + ApiKeyHeader (the model name is not fixed in code).
+        var settings = Settings(
+            ("Llm:Provider", "OpenAiCompatible"),
+            ("Llm:BaseUrl", "https://evren-llmapi.ssyz.org.tr/v1"),
+            ("Llm:AllowedHosts:0", "evren-llmapi.ssyz.org.tr"),
+            ("Llm:AuthScheme", "ApiKeyHeader"),
+            ("Llm:Model", "gemma-4-31b"),
+            ("Llm:ApiKey", SecretValue));
+        using var provider = TestServices.Build("Production", settings);
+        var options = provider.GetRequiredService<LlmOptions>();
+
+        Assert.True(options.UsesApiKeyHeader);
+        Assert.Equal("X-API-Key", options.AuthHeaderName);
+        Assert.Empty(OptionsValidator.ValidateLlm(options, development: false));
+        Assert.IsType<OpenAiCompatibleChatResponder>(provider.GetRequiredService<IChatResponder>());
+    }
+
+    [Fact]
+    public void ABadAuthSchemeInConfiguration_CannotBeResolved_AndTheMessageHasNoValue()
+    {
+        var settings = Settings(RealSettings());
+        settings["Llm:AuthScheme"] = "Basic-SECRET-SCHEME";
+        using var provider = TestServices.Build("Production", settings);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IChatResponder>());
+        Assert.Contains("Llm:AuthScheme", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET-SCHEME", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SecretValue, ex.Message, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- the registration
 
     private static Dictionary<string, string?> Settings(params (string Key, string Value)[] extra)
