@@ -94,6 +94,76 @@ public static class OptionsValidator
         return problems;
     }
 
+    /// <summary>
+    /// The model settings. With the default provider (<c>Fake</c>) nothing else is checked: no key, no URL, nothing leaves the server.
+    /// Messages name the SETTING only, never its value.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateLlm(LlmOptions llm, bool development)
+    {
+        if (llm.IsReal)
+        {
+            return ValidateEndpoint(llm, development);
+        }
+
+        return string.Equals(llm.Provider, LlmOptions.FakeProvider, StringComparison.OrdinalIgnoreCase)
+            ? []
+            : ["Llm:Provider must be Fake or OpenAiCompatible."];
+    }
+
+    /// <summary>Everything a real model call needs. The evaluation command uses it too, whatever <c>Llm:Provider</c> says.</summary>
+    public static IReadOnlyList<string> ValidateEndpoint(LlmOptions llm, bool development)
+    {
+        var problems = new List<string>();
+
+        problems.AddRange(LlmEndpointPolicy.Check(llm.BaseUrl, llm.AllowedHosts, development));
+
+        if (string.IsNullOrWhiteSpace(llm.ApiKey))
+        {
+            problems.Add("Llm:ApiKey is missing (set it with user-secrets or the Llm__ApiKey environment variable).");
+        }
+
+        if (string.IsNullOrWhiteSpace(llm.Model))
+        {
+            problems.Add("Llm:Model is missing.");
+        }
+        else if (!LlmEndpointPolicy.IsValidModelName(llm.Model))
+        {
+            problems.Add("Llm:Model has characters a model name does not use.");
+        }
+
+        if (llm.Temperature is < 0 or > 2)
+        {
+            problems.Add("Llm:Temperature must be between 0 and 2.");
+        }
+
+        if (llm.MaxTokens is < 1 or > 8192)
+        {
+            problems.Add("Llm:MaxTokens must be between 1 and 8192.");
+        }
+
+        if (string.IsNullOrWhiteSpace(llm.MaxTokensParameter) || llm.MaxTokensParameter.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
+        {
+            problems.Add("Llm:MaxTokensParameter must be a plain field name.");
+        }
+
+        if (llm.FirstTokenTimeoutSeconds <= 0 || llm.IdleTimeoutSeconds <= 0 || llm.TotalTimeoutSeconds <= 0)
+        {
+            problems.Add("Llm:FirstTokenTimeoutSeconds, Llm:IdleTimeoutSeconds and Llm:TotalTimeoutSeconds must be positive.");
+        }
+
+        if (llm.MaxRetries is < 0 or > 5 || llm.RetryBaseDelayMs is < 0 or > 10_000)
+        {
+            problems.Add("Llm:MaxRetries must be 0-5 and Llm:RetryBaseDelayMs 0-10000.");
+        }
+
+        if (llm.MaxConcurrentRequests is < 1 or > 100)
+        {
+            problems.Add("Llm:MaxConcurrentRequests must be 1-100.");
+        }
+
+        return problems;
+    }
+
     /// <summary>The admin panel settings. Messages name the SETTING only.</summary>
     public static IReadOnlyList<string> ValidateAdmin(AdminAuthOptions admin, AuthOptions auth)
     {

@@ -76,7 +76,7 @@ internal sealed class MemoryChatStore : IChatStore
     public Task<IReadOnlyList<Message>> GetRecentAsync(Guid conversationId, int take, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<Message>>(Messages.OrderBy(m => m.CreatedAt).TakeLast(take).ToList());
 
-    public Task<Guid> AddAssistantMessageAsync(Guid conversationId, string text, MessageCompletion completion, bool isCrisis, CancellationToken ct)
+    public Task<Guid> AddAssistantMessageAsync(Guid conversationId, string text, MessageCompletion completion, bool isCrisis, string? systemPromptVersion, CancellationToken ct)
     {
         var message = new Message
         {
@@ -87,6 +87,7 @@ internal sealed class MemoryChatStore : IChatStore
             CreatedAt = Next(),
             Completion = completion,
             IsCrisis = isCrisis,
+            SystemPromptVersion = systemPromptVersion,
         };
         Messages.Add(message);
         return Task.FromResult(message.Id);
@@ -97,6 +98,11 @@ internal sealed class MemoryChatStore : IChatStore
 internal sealed class ScriptedResponder(params string[] chunks) : IChatResponder
 {
     public int Calls { get; private set; }
+
+    public string? PromptVersion { get; set; }
+
+    /// <summary>When set, the responder fails with this before it yields a word (the model was unavailable).</summary>
+    public Exception? FailBeforeFirstChunk { get; set; }
 
     public List<ConversationContext> Contexts { get; } = [];
 
@@ -109,6 +115,11 @@ internal sealed class ScriptedResponder(params string[] chunks) : IChatResponder
     {
         Calls++;
         Contexts.Add(context);
+        if (FailBeforeFirstChunk is not null)
+        {
+            throw FailBeforeFirstChunk;
+        }
+
         for (var i = 0; i < chunks.Length; i++)
         {
             yield return chunks[i];

@@ -57,6 +57,14 @@ if (args.Contains("generate-seed"))
     return SeedCommand.Run(app.Environment, app.Services, args);
 }
 
+// `evaluate-models --scenarios <file> --models a,b` (ADR 012): sends SYNTHETIC scenarios to the listed models and writes the replies to a local
+// folder. Development only, never touches the database, shows the target host and asks for "evet". Nothing here starts the web server.
+if (ModelEvaluationCommand.IsCommand(args))
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    return await ModelEvaluationCommand.RunAsync(app.Environment, app.Services, args, new SystemAdminConsole());
+}
+
 // `create-admin | set-admin-password | disable-admin | enable-admin --username <name>` (ADR 009): Development, run locally; shows the target
 // database server and asks for "evet" before anything happens. Nothing here starts the web server.
 if (AdminCommands.IsAdminCommand(args))

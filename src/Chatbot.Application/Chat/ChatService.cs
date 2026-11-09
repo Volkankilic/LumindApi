@@ -93,6 +93,9 @@ public sealed class ChatService(
 
         var written = new StringBuilder();
         var saved = false;
+
+        // Which prompt produced this reply: the fixed crisis reply has none (the model is not involved), a fallback reply is marked below.
+        var promptVersion = isCrisis ? null : responder.PromptVersion;
         try
         {
             IAsyncEnumerable<string> source = isCrisis
@@ -134,12 +137,30 @@ public sealed class ChatService(
                 yield break; // the finally block keeps what was written as "Stopped"
             }
 
+            if (failure is ModelUnavailableException && written.Length == 0)
+            {
+                // The model could not answer and nothing was shown yet: the participant gets the fixed, kind fallback text as a normal
+                // reply. It is marked in system_prompt_version so that exports can tell it from a model reply, and it is never context.
+                promptVersion = FallbackReply.Version;
+                foreach (var chunk in ChatRules.Chunks(FallbackReply.Text))
+                {
+                    written.Append(chunk);
+                    yield return new ChatEvent.Delta(chunk);
+                }
+
+                var fallbackId = await store.AddAssistantMessageAsync(
+                    conversationId, written.ToString().TrimEnd(), MessageCompletion.Complete, false, promptVersion, CancellationToken.None);
+                saved = true;
+                yield return new ChatEvent.Done(fallbackId);
+                yield break;
+            }
+
             if (failure is not null)
             {
                 if (written.Length > 0)
                 {
                     await store.AddAssistantMessageAsync(
-                        conversationId, written.ToString().TrimEnd(), MessageCompletion.Incomplete, isCrisis, CancellationToken.None);
+                        conversationId, written.ToString().TrimEnd(), MessageCompletion.Incomplete, isCrisis, promptVersion, CancellationToken.None);
                 }
 
                 saved = true;
@@ -150,7 +171,7 @@ public sealed class ChatService(
             }
 
             var assistantId = await store.AddAssistantMessageAsync(
-                conversationId, written.ToString().TrimEnd(), MessageCompletion.Complete, isCrisis, CancellationToken.None);
+                conversationId, written.ToString().TrimEnd(), MessageCompletion.Complete, isCrisis, promptVersion, CancellationToken.None);
             saved = true;
             yield return new ChatEvent.Done(assistantId);
         }
@@ -162,7 +183,7 @@ public sealed class ChatService(
                 try
                 {
                     await store.AddAssistantMessageAsync(
-                        conversationId, written.ToString().TrimEnd(), MessageCompletion.Stopped, isCrisis, CancellationToken.None);
+                        conversationId, written.ToString().TrimEnd(), MessageCompletion.Stopped, isCrisis, promptVersion, CancellationToken.None);
                 }
                 catch (Exception)
                 {
@@ -176,9 +197,7 @@ public sealed class ChatService(
     {
         // Read a little more than needed: incomplete replies are filtered out before the cut.
         var recent = await store.GetRecentAsync(conversationId, options.ContextMessages * 2, ct);
-        var context = ChatRules.BuildContext(recent, options.ContextMessages)
-            .Select(m => m with { Text = redactor.Redact(m.Text) })
-            .ToList();
+        var context = ChatRules.BuildModelContext(recent, options.ContextMessages, redactor);
         return new ConversationContext(context, clientMessageId);
     }
 

@@ -48,14 +48,26 @@ public static partial class ChatRules
     }
 
     /// <summary>
-    /// The latest <paramref name="take"/> messages. Only COMPLETE assistant messages and all user messages are context:
-    /// a stopped or cut off reply is not something the participant (or a model) should build on.
+    /// The latest <paramref name="take"/> messages a model may see. Only COMPLETE assistant messages and user messages are context:
+    /// a stopped or cut off reply is not something the participant (or a model) should build on. Three kinds never reach a model at all:
+    /// a user message flagged as a crisis, the fixed crisis reply, and a fallback reply (its text is not the model's own).
     /// </summary>
     public static IReadOnlyList<ContextMessage> BuildContext(IEnumerable<Message> messagesOldestFirst, int take) =>
         messagesOldestFirst
             .Where(m => m.Role == MessageRole.User || m.Completion == MessageCompletion.Complete)
+            .Where(m => !m.IsCrisis)
+            .Where(m => !string.Equals(m.SystemPromptVersion, FallbackReply.Version, StringComparison.Ordinal))
             .TakeLast(Math.Max(1, take))
             .Select(m => new ContextMessage(m.Role, m.Content))
+            .ToList();
+
+    /// <summary>
+    /// What is sent to a model: <see cref="BuildContext"/>, with every text masked first (personal data never leaves unmasked).
+    /// The send pipeline and the evaluation command both call this, so what is measured is what would be sent.
+    /// </summary>
+    public static IReadOnlyList<ContextMessage> BuildModelContext(IEnumerable<Message> messagesOldestFirst, int take, IPiiRedactor redactor) =>
+        BuildContext(messagesOldestFirst, take)
+            .Select(m => m with { Text = redactor.Redact(m.Text) })
             .ToList();
 
     /// <summary>Splits a reply into words that keep their trailing space, as the client mock did.</summary>

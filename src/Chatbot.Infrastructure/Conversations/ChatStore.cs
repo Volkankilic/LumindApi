@@ -112,6 +112,7 @@ public sealed class ChatStore(AppDbContext db, TimeProvider clock, IAuditWriter 
         string text,
         MessageCompletion completion,
         bool isCrisis,
+        string? systemPromptVersion,
         CancellationToken ct)
     {
         var message = new Message
@@ -123,6 +124,7 @@ public sealed class ChatStore(AppDbContext db, TimeProvider clock, IAuditWriter 
             CreatedAt = clock.GetUtcNow(),
             Completion = completion,
             IsCrisis = isCrisis,
+            SystemPromptVersion = systemPromptVersion,
         };
         db.Messages.Add(message);
         await db.SaveChangesAsync(ct);

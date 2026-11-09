@@ -69,6 +69,8 @@ public sealed class DevTriggerChatResponder(IChatResponder inner, DevChatTrigger
 {
     private const int CutAfterChunks = 6;
 
+    public string? PromptVersion => inner.PromptVersion;
+
     public async IAsyncEnumerable<string> StreamReplyAsync(
         ConversationContext context,
         [EnumeratorCancellation] CancellationToken ct)

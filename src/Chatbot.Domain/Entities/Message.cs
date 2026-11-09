@@ -21,6 +21,9 @@ public class Message
     /// <summary>Only for assistant messages.</summary>
     public MessageCompletion? Completion { get; set; }
 
-    /// <summary>Reserved for phase 6 (which system prompt version produced the reply).</summary>
+    /// <summary>
+    /// Only for assistant messages: the system prompt version that produced a model reply (e.g. "v1+3fa9c2d1"), or "fallback" for the fixed
+    /// reply given when the model was unavailable. Null for fake and crisis replies. The column is unbounded text.
+    /// </summary>
     public string? SystemPromptVersion { get; set; }
 }

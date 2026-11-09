@@ -31,10 +31,68 @@ public sealed record ConversationContext(
     Guid ClientMessageId,
     ReplyPacing Pacing = ReplyPacing.Normal);
 
-/// <summary>Produces the assistant reply as text chunks (words). Phase 6 adds a real model behind this interface.</summary>
+/// <summary>Produces the assistant reply as text chunks (words). The fake responder is the default; the OpenAI compatible one is opt-in (phase 6a).</summary>
 public interface IChatResponder
 {
     IAsyncEnumerable<string> StreamReplyAsync(ConversationContext context, CancellationToken ct);
+
+    /// <summary>
+    /// Which system prompt produced the replies (stored with each assistant message, see <see cref="FallbackReply.Version"/>).
+    /// Null for responders that use none (the fake one).
+    /// </summary>
+    string? PromptVersion => null;
+}
+
+/// <summary>The system prompt a model gets. Loaded from a file inside the assembly; the version is stored with every reply it produced.</summary>
+public interface ISystemPromptProvider
+{
+    string Text { get; }
+
+    /// <summary>A short label plus a hash of the text, e.g. <c>v1+3fa9c2d1</c>: any edit of the text changes it.</summary>
+    string Version { get; }
+}
+
+/// <summary>
+/// Why a model reply could not be had. The reason is a fixed category: it never carries a response body, a message text, a URL or a key.
+/// </summary>
+public enum ModelFailure
+{
+    Network,
+    Timeout,
+    Busy,
+    ServerError,
+    RateLimited,
+
+    /// <summary>The provider refused the request (4xx other than 408/429): a configuration problem, not worth repeating.</summary>
+    Rejected,
+
+    /// <summary>The answer was not what an OpenAI compatible endpoint sends, or it ended without a word.</summary>
+    BadAnswer,
+}
+
+public sealed class ModelUnavailableException(ModelFailure failure, int? statusCode = null)
+    : Exception("The model could not answer (" + failure + (statusCode is null ? string.Empty : ", status " + statusCode) + ").")
+{
+    public ModelFailure Failure { get; } = failure;
+
+    public int? StatusCode { get; } = statusCode;
+
+    /// <summary>The provider's own "try again after" hint (rate limiting), if it sent one.</summary>
+    public TimeSpan? RetryAfter { get; init; }
+}
+
+/// <summary>
+/// The reply the participant gets when the model could not answer before a single word arrived. It is stored like any reply, but its
+/// <c>system_prompt_version</c> is <see cref="Version"/>, so research exports can leave it out (docs/decisions/012).
+/// </summary>
+public static class FallbackReply
+{
+    /// <summary>The value of <c>messages.system_prompt_version</c> for a fallback reply.</summary>
+    public const string Version = "fallback";
+
+    // TODO(volkan): metin onayı (yedek yanıt metni; klinik uzman onayı pilot öncesi kontrol listesinde).
+    public const string Text =
+        "Şu an sana yanıt veremiyorum. Yazdığın kaybolmadı; biraz sonra yeniden deneyebilirsin. Kendini güvende hissetmiyorsan lütfen 112'yi ara.";
 }
 
 /// <summary>
@@ -132,11 +190,13 @@ public interface IChatStore
     /// <summary>The latest messages of the conversation, oldest first.</summary>
     Task<IReadOnlyList<Message>> GetRecentAsync(Guid conversationId, int take, CancellationToken ct);
 
+    /// <param name="systemPromptVersion">The prompt version of a model reply, <see cref="FallbackReply.Version"/> for a fallback reply, null otherwise (fake and crisis replies).</param>
     Task<Guid> AddAssistantMessageAsync(
         Guid conversationId,
         string text,
         MessageCompletion completion,
         bool isCrisis,
+        string? systemPromptVersion,
         CancellationToken ct);
 }
 

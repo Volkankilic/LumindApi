@@ -63,7 +63,52 @@ cd api
 dotnet user-secrets set "Admin:JwtSigningKey" "<PANODAKİ-DEĞER>" --project src/Chatbot.Api
 ```
 
-Railway'de aynı ad `Admin__JwtSigningKey` olur (yerelle aynı olması gerekmez). Anahtar yoksa API **başlamaz**. Yönetici hesapları yalnızca komut satırından açılır (`create-admin`, `set-admin-password`, `disable-admin`, `enable-admin`; ayrıntı `docs/yonetim-kilavuzu.md`). Komutlar hedef veritabanı sunucu adını gösterip `evet` ister.
+Railway'de aynı ad `Admin__JwtSigningKey` olur (yerelle aynı olması gerekmez). Anahtar yoksa API **başlamaz**.
+
+**Model ayarları (Faz 6a, isteğe bağlı, VARSAYILAN KAPALI):** `Llm:Provider` verilmezse `Fake` kalır ve hiçbir ayar gerekmez. Gerçek bir model denemek için (yalnızca yerelde, **yalnızca sentetik veriyle**; değerleri kendi sağlayıcınızdan alın, anahtarı sohbete yazmayın):
+
+```powershell
+cd api
+dotnet user-secrets set "Llm:BaseUrl" "https://<sağlayıcı-alanadı>/v1" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:AllowedHosts:0" "<sağlayıcı-alanadı>" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:ApiKey" "<ANAHTAR>" --project src/Chatbot.Api
+dotnet user-secrets set "Llm:Model" "<model-adı>" --project src/Chatbot.Api
+# yalnızca API'nin sohbette modeli kullanması için (değerlendirme komutu buna gerek duymaz):
+dotnet user-secrets set "Llm:Provider" "OpenAiCompatible" --project src/Chatbot.Api
+```
+
+`Llm:BaseUrl` ana makinesi `Llm:AllowedHosts` listesinde değilse (ya da https değilse) API **başlamaz**; ileti yalnızca ayar adını söyler. İsteğe bağlı ayarlar ve varsayılanları: `Temperature` 0,6, `MaxTokens` 400 (`MaxTokensParameter`: alan adı, varsayılan `max_tokens`), `FirstTokenTimeoutSeconds` 25, `IdleTimeoutSeconds` 20, `TotalTimeoutSeconds` 120, `MaxRetries` 2, `RetryBaseDelayMs` 500, `MaxConcurrentRequests` 8. Railway'de ad biçimi `Llm__ApiKey`, `Llm__AllowedHosts__0` vb. Ayrıntı: [ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md).
+
+### Model değerlendirme komutu (yerel, sentetik veri)
+
+```powershell
+cd api
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
+dotnet run --project src/Chatbot.Api --no-launch-profile -- evaluate-models --scenarios <senaryolar.json> --models "<model-a>,<model-b>"
+```
+
+Senaryo dosyasındaki her senaryoyu listedeki her modele, sohbettekiyle aynı parçalardan geçirerek gönderir (kriz algılama → kişisel veri maskeleme → sistem istemi → bağlam kuralları → istemci, aynı zaman aşımı ve yeniden deneme) ve yanıtları ile süreleri bir klasöre yazar. **Veritabanına dokunmaz.** Hedef sunucuyu gösterip `evet` ister. Anahtar yalnızca user-secrets'tan okunur ve hiçbir çıktıya yazılmaz.
+
+- **Gerçek kişisel veri kullanılmaz.** Dosyada `"synthetic": true` bulunmazsa komut reddeder; senaryolar uydurmadır.
+- **Kriz algılanan senaryo modele gönderilmez** (`crisis-intercepted` olarak kaydedilir; sohbetteki gibi).
+- **Çıktı:** `api/eval-out/<zaman>/results.jsonl` (senaryo, model, ilk parça ms, toplam ms, durum, deneme, yanıt, istem sürümü) ve `summary.md` (model başına medyan/p95). Klasör git'e girmez; `--out` yalnızca `api/eval-out/` altında ya da depo dışında olabilir. İçeriği sohbete, e-postaya ya da repoya koymayın.
+- `--prompt <dosya>`: gömülü istem yerine bir istem varyantı dener (sürüm etiketi ve özeti sonuçta kayıtlıdır).
+
+Senaryo dosyası biçimi:
+
+```json
+{
+  "version": 1,
+  "synthetic": true,
+  "models": ["isteğe-bağlı-model-adı"],
+  "scenarios": [
+    { "id": "s01", "title": "kısa başlık",
+      "turns": [ { "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }, { "role": "user", "text": "…" } ] }
+  ]
+}
+```
+
+Son tur `user` olmalıdır; `--models` verilirse dosyadaki `models` listesini ezer. Yönetici hesapları yalnızca komut satırından açılır (`create-admin`, `set-admin-password`, `disable-admin`, `enable-admin`; ayrıntı `docs/yonetim-kilavuzu.md`). Komutlar hedef veritabanı sunucu adını gösterip `evet` ister.
 
 `Auth:CodePepper` Railway'deki API ile **aynı** olmalıdır (kod hash'leri pepper'a bağlıdır). Ayrıntılar kök [README.md](../README.md) içindeki "Railway'e yayınlama" bölümündedir. Geliştirme ayarları (`Auth:CookieSecure=false`, `Cors:AllowedOrigins`) için `appsettings.Development.example.json` dosyasını `appsettings.Development.json` olarak kopyalayın; bu dosya git'e eklenmez.
 

@@ -15,6 +15,7 @@ public sealed class ConfigurationValidationService(
     DocumentsOptions documents,
     ChatOptions chat,
     AdminAuthOptions adminOptions,
+    LlmOptions llm,
     ICrisisDetector crisisDetector,
     IHostEnvironment environment) : IHostedService
 {
@@ -38,6 +39,9 @@ public sealed class ConfigurationValidationService(
             requireDatabase: true,
             production: environment.IsProduction(),
             admin: adminOptions);
+
+        // A model provider that is not allowed (or half configured) stops the application; the default (Fake) checks nothing.
+        problems = [.. problems, .. OptionsValidator.ValidateLlm(llm, environment.IsDevelopment())];
         if (problems.Count > 0)
         {
             throw new InvalidOperationException("Invalid configuration: " + string.Join(" ", problems));

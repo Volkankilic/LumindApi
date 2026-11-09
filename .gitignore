@@ -31,3 +31,6 @@ TestResults/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Model evaluation results (evaluate-models): replies to synthetic scenarios, local only (docs/decisions/012)
+/eval-out/

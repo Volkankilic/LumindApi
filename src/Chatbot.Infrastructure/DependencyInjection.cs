@@ -4,6 +4,7 @@ using Chatbot.Application.Conversations;
 using Chatbot.Application.Options;
 using Chatbot.Infrastructure.Chat;
 using Chatbot.Infrastructure.Chat.Crisis;
+using Chatbot.Infrastructure.Chat.Llm;
 using Chatbot.Infrastructure.Conversations;
 using Chatbot.Infrastructure.Dev;
 using Chatbot.Infrastructure.Participants;
@@ -41,6 +42,7 @@ public static class DependencyInjection
         services.AddSingleton(sp => Bind<DocumentsOptions>(sp, DocumentsOptions.Section));
         services.AddSingleton(sp => Bind<PrivacyOptions>(sp, PrivacyOptions.Section));
         services.AddSingleton(sp => Bind<ChatOptions>(sp, ChatOptions.Section));
+        services.AddSingleton(sp => Bind<LlmOptions>(sp, LlmOptions.Section));
         services.AddSingleton(sp => Bind<DatabaseOptions>(sp, DatabaseOptions.Section));
 
         // EF Core is only the ORM: no Migrate(), no EnsureCreated() anywhere. The schema comes from api/db/*.sql.
@@ -98,10 +100,22 @@ public static class DependencyInjection
                 ? sp.GetRequiredService<DevChatTriggers>()
                 : new NoopDevChatTriggers());
 
+        // The reply source. The canned fake reply is the default; the OpenAI compatible model client is opt-in through
+        // Llm:Provider (phase 6a, ADR 012) and only starts when the base URL host is on Llm:AllowedHosts.
+        services.AddSingleton<ISystemPromptProvider>(_ => SystemPromptText.LoadEmbedded());
         services.AddSingleton<IChatResponder>(sp =>
         {
-            IChatResponder responder = new FakeChatResponder(sp.GetRequiredService<ChatOptions>());
-            return sp.GetRequiredService<IHostEnvironment>().IsDevelopment()
+            var development = sp.GetRequiredService<IHostEnvironment>().IsDevelopment();
+            var llm = sp.GetRequiredService<LlmOptions>();
+            IChatResponder responder = llm.IsReal
+                ? new OpenAiCompatibleChatResponder(
+                    LlmHttpClient.Create(),
+                    llm,
+                    sp.GetRequiredService<ISystemPromptProvider>(),
+                    sp.GetRequiredService<ILogger<OpenAiCompatibleChatResponder>>(),
+                    development)
+                : new FakeChatResponder(sp.GetRequiredService<ChatOptions>());
+            return development
                 ? new DevTriggerChatResponder(responder, sp.GetRequiredService<DevChatTriggers>())
                 : responder;
         });

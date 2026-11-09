@@ -197,6 +197,69 @@ public sealed class FakeChatOptions
     public int TokenDelayMs { get; set; } = 60;
 }
 
+/// <summary>
+/// The language model behind <c>IChatResponder</c> (phase 6a). The default is the canned fake reply: nothing leaves the server until
+/// <see cref="Provider"/> is set to <c>OpenAiCompatible</c> AND a base URL on the allow list is configured. The API key comes only from
+/// user-secrets or an environment variable (<c>Llm__ApiKey</c>); no setting here is ever logged.
+/// </summary>
+public sealed class LlmOptions
+{
+    public const string Section = "Llm";
+
+    public const string FakeProvider = "Fake";
+
+    public const string OpenAiCompatibleProvider = "OpenAiCompatible";
+
+    /// <summary><c>Fake</c> (default) or <c>OpenAiCompatible</c>.</summary>
+    public string Provider { get; set; } = FakeProvider;
+
+    /// <summary>The API root that already contains the version path, e.g. <c>https://host/v1</c>. The request goes to <c>{BaseUrl}/chat/completions</c>.</summary>
+    public string? BaseUrl { get; set; }
+
+    /// <summary>Model name. Only ever read from here: it is not written in code.</summary>
+    public string? Model { get; set; }
+
+    /// <summary>Secret. user-secrets / environment variable only.</summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>Host names (no scheme, no wildcard) the base URL may point to. The application does not start when the base URL's host is not listed.</summary>
+    public string[] AllowedHosts { get; set; } = [];
+
+    public double? Temperature { get; set; } = 0.6;
+
+    /// <summary>Upper bound of the reply length. Replies are meant to be short.</summary>
+    public int? MaxTokens { get; set; } = 400;
+
+    /// <summary>The name of the field that carries <see cref="MaxTokens"/> (some providers use <c>max_completion_tokens</c>).</summary>
+    public string MaxTokensParameter { get; set; } = "max_tokens";
+
+    /// <summary>Connection plus the wait for the first word of a reply (per attempt).</summary>
+    public double FirstTokenTimeoutSeconds { get; set; } = 25;
+
+    /// <summary>The longest silence between two parts of a reply that already started.</summary>
+    public double IdleTimeoutSeconds { get; set; } = 20;
+
+    /// <summary>The longest a whole reply may take.</summary>
+    public double TotalTimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Extra attempts BEFORE the first word arrived (never after: a reply that started is not repeated).</summary>
+    public int MaxRetries { get; set; } = 2;
+
+    public int RetryBaseDelayMs { get; set; } = 500;
+
+    /// <summary>Requests to the provider at the same time (all participants together).</summary>
+    public int MaxConcurrentRequests { get; set; } = 8;
+
+    public bool IsReal => string.Equals(Provider, OpenAiCompatibleProvider, StringComparison.OrdinalIgnoreCase);
+
+    public LlmOptions WithModel(string model)
+    {
+        var copy = (LlmOptions)MemberwiseClone();
+        copy.Model = model;
+        return copy;
+    }
+}
+
 public sealed class DatabaseOptions
 {
     public const string Section = "Database";
