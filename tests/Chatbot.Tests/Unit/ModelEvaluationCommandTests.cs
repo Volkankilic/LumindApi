@@ -487,6 +487,250 @@ public class ModelEvaluationCommandTests : IDisposable
         }
     }
 
+    // ---------------------------------------------------------------- --extra-body, reasoning and token numbers
+
+    private const string ConfigExtra = """{"from_settings":{"x":1}}""";
+
+    private string WriteExtra(string text, string? name = null)
+    {
+        var path = Path.Combine(_root, name ?? "extra-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, text, new UTF8Encoding(false));
+        return path;
+    }
+
+    private static string Raw(object payload) => "data: " + JsonSerializer.Serialize(payload);
+
+    private static string Thought(string field, string text) =>
+        Raw(new { choices = new[] { new { delta = new Dictionary<string, string> { [field] = text } } } });
+
+    /// <summary>A reasoning model: 10 + 11 characters of thinking, a two part answer, and the server's own token count (57).</summary>
+    private static FakeLlmHandler ReasoningHandler() => new((_, _) => Task.FromResult(FakeLlmHandler.Sse(new ScriptedStream(
+        Thought("reasoning_content", "thinking-A") + "\n\n",
+        Thought("reasoning", "thinking-BB") + "\n\n",
+        new ScriptedStream.Pause(TimeSpan.FromMilliseconds(300)),
+        FakeLlmHandler.Data("Bunu duymak çok ağır olmalı.") + "\n\n",
+        FakeLlmHandler.Data(" Buradayım.") + "\n\n",
+        Raw(new { choices = Array.Empty<object>(), usage = new { completion_tokens = 57 } }) + "\n\n",
+        "data: [DONE]\n\n"))));
+
+    [Fact]
+    public async Task TheExtraBodyFile_IsMergedIntoTheRequest_AndReplacesTheSetting()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:ExtraBodyJson"] = ConfigExtra);
+        var handler = OkHandler();
+        var file = WriteExtra("""{"chat_template_kwargs":{"enable_thinking":false}}""");
+
+        var code = await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", file, "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.All(handler.Requests, r =>
+        {
+            using var body = JsonDocument.Parse(r.Body);
+            Assert.False(body.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean());
+            Assert.False(body.RootElement.TryGetProperty("from_settings", out _)); // the file REPLACES the setting
+            Assert.Equal("m1", body.RootElement.GetProperty("model").GetString());
+        });
+    }
+
+    [Fact]
+    public async Task WithoutTheOption_TheSettingsExtraBodyIsUsed()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:ExtraBodyJson"] = ConfigExtra);
+        var handler = OkHandler();
+
+        await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+        Assert.All(handler.Requests, r => Assert.Contains("from_settings", r.Body, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnEmptyExtraBodyFile_MeansNoExtraFieldsAtAll_EvenWhenTheSettingHasSome()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:ExtraBodyJson"] = ConfigExtra);
+        var handler = OkHandler();
+
+        await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", WriteExtra("  "), "--out", OutsideRepo);
+
+        Assert.All(handler.Requests, r => Assert.DoesNotContain("from_settings", r.Body, StringComparison.Ordinal));
+        Assert.All(ResultLines(OutsideRepo), l => Assert.Empty(JsonDocument.Parse(l).RootElement.GetProperty("extraBodyKeys").EnumerateArray()));
+    }
+
+    [Fact]
+    public async Task EachRunCanTakeItsOwnExtraBodyFile()
+    {
+        var (services, env) = Build();
+        var first = OkHandler();
+        var second = OkHandler();
+
+        await Run(services, env, new ScriptedConsole("evet"), first, "--scenarios", StandardFile(), "--models", "model-a", "--extra-body", WriteExtra("""{"chat_template_kwargs":{"enable_thinking":false}}"""), "--out", Path.Combine(OutsideRepo, "a"));
+        await Run(services, env, new ScriptedConsole("evet"), second, "--scenarios", StandardFile(), "--models", "model-b", "--extra-body", WriteExtra("""{"reasoning_effort":"low"}"""), "--out", Path.Combine(OutsideRepo, "b"));
+
+        Assert.All(first.Requests, r => Assert.Contains("enable_thinking", r.Body, StringComparison.Ordinal));
+        Assert.All(second.Requests, r =>
+        {
+            Assert.Contains("reasoning_effort", r.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("enable_thinking", r.Body, StringComparison.Ordinal);
+        });
+    }
+
+    [Theory]
+    [InlineData("""{"model":"SECRET-EXTRA-VALUE"}""")]
+    [InlineData("""{"max_tokens":1,"SECRET-EXTRA-KEY":"SECRET-EXTRA-VALUE"}""")]
+    [InlineData("[1,2] SECRET-EXTRA-VALUE")]
+    [InlineData("{ not json SECRET-EXTRA-VALUE")]
+    public async Task ABadExtraBodyFile_StopsTheCommand_BeforeAnythingIsAskedOrSent_AndItsTextIsNotPrinted(string text)
+    {
+        var (services, env) = Build();
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", WriteExtra(text), "--out", OutsideRepo);
+
+        Assert.Equal(1, code);
+        Assert.Equal(0, handler.Count);
+        Assert.Contains("--extra-body", console.All, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET-EXTRA", console.All, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(OutsideRepo));
+    }
+
+    [Fact]
+    public async Task AMissingOrTooLargeExtraBodyFile_StopsTheCommand()
+    {
+        var (services, env) = Build();
+        var handler = OkHandler();
+
+        var missing = new ScriptedConsole("evet");
+        Assert.Equal(1, await Run(services, env, missing, handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", Path.Combine(_root, "yok.json"), "--out", OutsideRepo));
+        Assert.Contains("bulunamadı", missing.All, StringComparison.Ordinal);
+
+        var big = new ScriptedConsole("evet");
+        Assert.Equal(1, await Run(services, env, big, handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", WriteExtra("{\"p\":\"" + new string('x', 3000) + "\"}"), "--out", OutsideRepo));
+        Assert.Contains("çok büyük", big.All, StringComparison.Ordinal);
+        Assert.Equal(0, handler.Count);
+    }
+
+    [Fact]
+    public async Task TheConsoleNamesTheExtraFields_NeverTheirValues_AndTheFileIsOnlyRead()
+    {
+        var (services, env) = Build();
+        var file = WriteExtra("""{"chat_template_kwargs":{"secret_flag":"SECRET-EXTRA-VALUE"},"top_k":20}""");
+        var before = File.ReadAllBytes(file);
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, OkHandler(), "--scenarios", StandardFile(), "--models", "m1", "--extra-body", file, "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.Contains("Ek istek alanları (yalnızca adlar): chat_template_kwargs, top_k", console.All, StringComparison.Ordinal);
+        var everything = console.All + string.Join("\n", ResultLines(OutsideRepo)) + File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.DoesNotContain("SECRET-EXTRA-VALUE", everything, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret_flag", everything, StringComparison.Ordinal); // not even the nested names: only top level keys are listed
+        Assert.Equal(before, File.ReadAllBytes(file));
+    }
+
+    [Fact]
+    public async Task TheRows_CarryTokensReasoningLengthAndTheExtraKeys_ButNeverTheReasoningText()
+    {
+        var (services, env) = Build();
+        var handler = ReasoningHandler();
+        var console = new ScriptedConsole("evet");
+        var file = WriteExtra("""{"chat_template_kwargs":{"enable_thinking":false},"stream_options":{"include_usage":true}}""");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", file, "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        var rows = ResultLines(OutsideRepo).Select(l => JsonDocument.Parse(l).RootElement).ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r =>
+        {
+            Assert.Equal("ok", r.GetProperty("status").GetString());
+            Assert.Equal(Reply, r.GetProperty("reply").GetString()); // the answer only: no reasoning in it
+            Assert.Equal(57, r.GetProperty("completionTokens").GetInt32());
+            Assert.Equal(21, r.GetProperty("reasoningChars").GetInt64()); // 10 + 11 characters, counted
+            Assert.Equal(["chat_template_kwargs", "stream_options"], r.GetProperty("extraBodyKeys").EnumerateArray().Select(e => e.GetString()!).ToArray());
+            Assert.Equal(2, r.GetProperty("parts").GetInt32()); // the reasoning events are not parts
+            Assert.InRange(r.GetProperty("firstPartMs").GetInt64(), 250, 10_000); // measured on the content, after the pause
+        });
+
+        var everything = console.All + string.Join("\n", ResultLines(OutsideRepo)) + File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.DoesNotContain("thinking-A", everything, StringComparison.Ordinal);
+        Assert.DoesNotContain("thinking-BB", everything, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheSummary_HasTheMedianTokensAndTheMedianReasoningChars_PerModel()
+    {
+        var (services, env) = Build();
+
+        await Run(services, env, new ScriptedConsole("evet"), ReasoningHandler(), "--scenarios", StandardFile(), "--models", "m1,m2", "--out", OutsideRepo);
+
+        var summary = File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.Contains("Jeton (medyan)", summary, StringComparison.Ordinal);
+        Assert.Contains("reasoningChars (medyan)", summary, StringComparison.Ordinal);
+        var lines = summary.Split('\n').Where(l => l.StartsWith("| m", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, l =>
+        {
+            var cells = l.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal("57", cells[^2]);
+            Assert.Equal("21", cells[^1]);
+        });
+    }
+
+    [Fact]
+    public async Task WhenTheServerSendsNoUsage_TokensAreNull_AndTheSummaryShowsADash()
+    {
+        var (services, env) = Build();
+
+        await Run(services, env, new ScriptedConsole("evet"), OkHandler(), "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+        Assert.All(ResultLines(OutsideRepo), l =>
+        {
+            var row = JsonDocument.Parse(l).RootElement;
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("completionTokens").ValueKind);
+            Assert.Equal(0, row.GetProperty("reasoningChars").GetInt64());
+        });
+        var cells = File.ReadAllText(Path.Combine(OutsideRepo, "summary.md")).Split('\n').First(l => l.StartsWith("| m1", StringComparison.Ordinal))
+            .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal("-", cells[^2]);
+        Assert.Equal("0", cells[^1]);
+    }
+
+    [Fact]
+    public async Task ACrisisRow_HasNoNumbers_ButStillNamesTheExtraKeysThatWouldHaveBeenSent()
+    {
+        var (services, env) = Build(tweak: s => s["Llm:ExtraBodyJson"] = ConfigExtra);
+        var file = WriteScenarios(new { version = 1, synthetic = true, scenarios = new[] { Scenario("kriz", ("user", "Bazen ölmek istiyorum")) } });
+
+        await Run(services, env, new ScriptedConsole("evet"), OkHandler(), "--scenarios", file, "--models", "m1", "--out", OutsideRepo);
+
+        var row = JsonDocument.Parse(ResultLines(OutsideRepo).Single()).RootElement;
+        Assert.Equal("crisis-intercepted", row.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("completionTokens").ValueKind);
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("reasoningChars").ValueKind);
+        Assert.Equal(["from_settings"], row.GetProperty("extraBodyKeys").EnumerateArray().Select(e => e.GetString()!).ToArray());
+    }
+
+    [Fact]
+    public async Task AnExtraBodyThatTheServerRejects_IsAnUnavailableRowWithTheStatus_NotACrash()
+    {
+        // the real EVREN behaviour: unknown fields answer 400
+        var (services, env) = Build();
+        var handler = new FakeLlmHandler((_, _) => Task.FromResult(FakeLlmHandler.Status(HttpStatusCode.BadRequest, "unknown field SECRET-EXTRA-VALUE")));
+
+        var code = await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--models", "m1", "--extra-body", WriteExtra("""{"reasoning_effort":"low"}"""), "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.Equal(2, handler.Count); // one attempt per scenario: a 400 is not repeated
+        Assert.All(ResultLines(OutsideRepo), l =>
+        {
+            var row = JsonDocument.Parse(l).RootElement;
+            Assert.Equal("unavailable", row.GetProperty("status").GetString());
+            Assert.Equal("Rejected 400", row.GetProperty("reason").GetString());
+            Assert.Equal(["reasoning_effort"], row.GetProperty("extraBodyKeys").EnumerateArray().Select(e => e.GetString()!).ToArray());
+        });
+        Assert.DoesNotContain("SECRET-EXTRA-VALUE", File.ReadAllText(Path.Combine(OutsideRepo, "results.jsonl")), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AnotherPromptFile_CanBeTried_AndItsVersionIsRecorded()
     {

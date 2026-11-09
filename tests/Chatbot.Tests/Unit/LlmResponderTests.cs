@@ -642,6 +642,244 @@ public class LlmResponderTests
         Assert.InRange(words.Count, 1, 40);
     }
 
+    // ---------------------------------------------------------------- extra body fields (Llm:ExtraBodyJson)
+
+    private const string EvrenExtra = """{"chat_template_kwargs":{"enable_thinking":false}}""";
+
+    private static string BodyOf(Action<LlmOptions>? tweak)
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler, tweak);
+        Read(responder).GetAwaiter().GetResult();
+        return handler.Requests.Single().Body;
+    }
+
+    [Fact]
+    public async Task AnExtraField_IsMergedNextToTheMainFields_AndTheMainFieldsStayAsTheyWere()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, prompt) = Make(handler, o => o.ExtraBodyJson = EvrenExtra);
+        await Read(responder);
+
+        using var body = JsonDocument.Parse(handler.Requests.Single().Body);
+        var root = body.RootElement;
+        Assert.False(root.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean());
+        Assert.Equal(["chat_template_kwargs", "max_tokens", "messages", "model", "stream", "temperature"], root.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        Assert.Equal("test-model-x", root.GetProperty("model").GetString());
+        Assert.True(root.GetProperty("stream").GetBoolean());
+        Assert.Equal(400, root.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(prompt.Text, root.GetProperty("messages")[0].GetProperty("content").GetString());
+        Assert.Equal(["chat_template_kwargs"], responder.ExtraBodyKeys);
+    }
+
+    [Fact]
+    public async Task ExtraFieldsOfAnyJsonKind_ArePassedOnUnchanged()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.ExtraBodyJson = """{"top_k":20,"stop":["###","\n\n"],"label":"x","nested":{"a":[1,2,{"b":null}]},"flag":true}""");
+        await Read(responder);
+
+        using var body = JsonDocument.Parse(handler.Requests.Single().Body);
+        var root = body.RootElement;
+        Assert.Equal(20, root.GetProperty("top_k").GetInt32());
+        Assert.Equal(["###", "\n\n"], root.GetProperty("stop").EnumerateArray().Select(e => e.GetString()!).ToArray());
+        Assert.Equal("x", root.GetProperty("label").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("nested").GetProperty("a")[2].GetProperty("b").ValueKind);
+        Assert.True(root.GetProperty("flag").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("{}")]
+    public void AnEmptyValue_ChangesNothing_TheBodyIsTheSameAsWithoutTheSetting(string? value)
+    {
+        var without = BodyOf(null);
+        Assert.Equal(without, BodyOf(o => o.ExtraBodyJson = value));
+        Assert.DoesNotContain("chat_template_kwargs", without, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheExtraFields_GoWithEveryAttempt()
+    {
+        var handler = new FakeLlmHandler((n, _) => Done(n == 1 ? FakeLlmHandler.Status(HttpStatusCode.ServiceUnavailable) : Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.ExtraBodyJson = EvrenExtra);
+        await Read(responder);
+
+        Assert.Equal(2, handler.Count);
+        Assert.All(handler.Requests, r => Assert.Contains("enable_thinking", r.Body, StringComparison.Ordinal));
+        Assert.Equal(handler.Requests[0].Body, handler.Requests[1].Body);
+    }
+
+    [Theory]
+    [InlineData("""{"model":"another"}""")]
+    [InlineData("""{"messages":[]}""")]
+    [InlineData("""{"stream":false}""")]
+    [InlineData("""{"max_tokens":5}""")]
+    [InlineData("""{"temperature":2}""")]
+    [InlineData("""{"MODEL":"another"}""")]
+    [InlineData("""{"ok":1,"Stream":false}""")]
+    [InlineData("not json {SECRET-EXTRA-TEXT")]
+    [InlineData("[1,2]")]
+    [InlineData("42")]
+    [InlineData("null")]
+    [InlineData("\"text\"")]
+    [InlineData("""{"a":1} trailing SECRET-EXTRA-TEXT""")]
+    [InlineData("""{"a":1,"a":2}""")]
+    [InlineData("""{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":1}}}}}}}}}}""")] // deeper than the limit
+    public void AnExtraBodyThatBreaksTheRules_StopsTheResponderFromBeingBuilt_WithoutNamingItsContent(string json)
+    {
+        var handler = new FakeLlmHandler((_, _) => throw new InvalidOperationException("no request may be sent"));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            new OpenAiCompatibleChatResponder(LlmHttpClient.Create(handler), Options(o => o.ExtraBodyJson = json), SystemPromptText.LoadEmbedded(), new ListLogger<OpenAiCompatibleChatResponder>(), development: false));
+
+        Assert.Contains("Llm:ExtraBodyJson", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET-EXTRA-TEXT", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("another", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(0, handler.Count);
+    }
+
+    [Fact]
+    public async Task TheConfiguredTokenFieldIsReservedToo()
+    {
+        Action<LlmOptions> custom = o =>
+        {
+            o.MaxTokensParameter = "max_completion_tokens";
+            o.ExtraBodyJson = """{"max_completion_tokens":5}""";
+        };
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            new OpenAiCompatibleChatResponder(LlmHttpClient.Create(new FakeLlmHandler((_, _) => throw new InvalidOperationException())), Options(custom), SystemPromptText.LoadEmbedded(), new ListLogger<OpenAiCompatibleChatResponder>(), development: false));
+        Assert.Contains("Llm:ExtraBodyJson", ex.Message, StringComparison.Ordinal);
+
+        // and with the default token field name, "max_completion_tokens" is just another extra field
+        var handler = new FakeLlmHandler((_, _) => Done(Ok("a")));
+        var (responder, _, _) = Make(handler, o => o.ExtraBodyJson = """{"max_completion_tokens":5}""");
+        await Read(responder);
+        Assert.Contains("\"max_completion_tokens\":5", handler.Requests.Single().Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnExtraBodyOver2KB_IsRefused()
+    {
+        var big = "{\"pad\":\"" + new string('x', LlmExtraBody.MaxBytes) + "\"}";
+        Assert.NotEmpty(LlmExtraBody.Check(big, "max_tokens", "Llm:ExtraBodyJson"));
+        var justFits = "{\"pad\":\"" + new string('x', LlmExtraBody.MaxBytes - 10) + "\"}";
+        Assert.Empty(LlmExtraBody.Check(justFits, "max_tokens", "Llm:ExtraBodyJson"));
+    }
+
+    // ---------------------------------------------------------------- reasoning: counted, never forwarded, never kept
+
+    private static string Raw(object payload) => "data: " + JsonSerializer.Serialize(payload);
+
+    private static string Thought(string field, string text) =>
+        Raw(new { choices = new[] { new { delta = new Dictionary<string, string> { [field] = text } } } });
+
+    [Fact]
+    public async Task ReasoningFields_AreCountedByLength_AndNeverYielded()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(FakeLlmHandler.Sse(
+            Thought("reasoning_content", "SECRET-THINKING-ONE"),
+            Thought("reasoning", "SECRET-THINKING-TWO!"),
+            FakeLlmHandler.Data("Merhaba"),
+            Thought("reasoning_content", "SECRET-THINKING-THREE"),
+            FakeLlmHandler.Data(" dünya"),
+            "data: [DONE]")));
+        var (responder, log, _) = Make(handler);
+        var stats = new ReplyStats();
+
+        var words = new List<string>();
+        await foreach (var w in responder.StreamAsync(Context, stats, default))
+        {
+            words.Add(w);
+        }
+
+        Assert.Equal(["Merhaba", " dünya"], words);
+        Assert.Equal("SECRET-THINKING-ONE".Length + "SECRET-THINKING-TWO!".Length + "SECRET-THINKING-THREE".Length, stats.ReasoningChars);
+        Assert.DoesNotContain("SECRET-THINKING", string.Join(" | ", words) + string.Join(" | ", log.Lines), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AReplyThatIsOnlyReasoning_IsNotAWord_SoItIsABadAnswerAfterTheRetries()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(FakeLlmHandler.Sse(Thought("reasoning_content", "SECRET-THINKING only"), "data: [DONE]")));
+        var (responder, log, _) = Make(handler);
+        var stats = new ReplyStats();
+
+        var ex = await Assert.ThrowsAsync<ModelUnavailableException>(async () =>
+        {
+            await foreach (var w in responder.StreamAsync(Context, stats, default))
+            {
+                _ = w;
+            }
+        });
+
+        Assert.Equal(ModelFailure.BadAnswer, ex.Failure);
+        Assert.Equal(3, handler.Count);
+        Assert.DoesNotContain("SECRET-THINKING", ex + string.Join(" | ", log.Lines), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheFirstPart_IsMeasuredOnTheContent_NotOnTheReasoningThatCameBefore()
+    {
+        var handler = new FakeLlmHandler((_, _) => Done(FakeLlmHandler.Sse(new ScriptedStream(
+            Thought("reasoning_content", "thinking") + "\n\n",
+            new ScriptedStream.Pause(TimeSpan.FromMilliseconds(400)),
+            FakeLlmHandler.Data("Merhaba") + "\n\n",
+            "data: [DONE]\n\n"))));
+        var (responder, log, _) = Make(handler);
+        await Read(responder);
+
+        var line = log.Lines.Single(l => l.Contains("Model reply finished", StringComparison.Ordinal));
+        var firstMs = long.Parse(System.Text.RegularExpressions.Regex.Match(line, "first part after (\\d+) ms").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(firstMs, 300, 5000); // the reasoning arrived at once; the first part is the content, ~400 ms later
+    }
+
+    [Fact]
+    public async Task TheServersTokenCount_IsTakenFromUsage_TheLastOneWins_AndNullWhenThereIsNone()
+    {
+        var withUsage = new FakeLlmHandler((_, _) => Done(FakeLlmHandler.Sse(
+            FakeLlmHandler.Data("a"),
+            Raw(new { choices = Array.Empty<object>(), usage = new { prompt_tokens = 10, completion_tokens = 7 } }),
+            Raw(new { choices = Array.Empty<object>(), usage = new { prompt_tokens = 10, completion_tokens = 42, total_tokens = 52 } }),
+            "data: [DONE]")));
+        var stats = new ReplyStats();
+        await foreach (var w in Make(withUsage).Responder.StreamAsync(Context, stats, default))
+        {
+            _ = w;
+        }
+
+        Assert.Equal(42, stats.CompletionTokens);
+
+        var without = new ReplyStats();
+        await foreach (var w in Make(new FakeLlmHandler((_, _) => Done(Ok("a")))).Responder.StreamAsync(Context, without, default))
+        {
+            _ = w;
+        }
+
+        Assert.Null(without.CompletionTokens);
+        Assert.Equal(0, without.ReasoningChars);
+    }
+
+    [Fact]
+    public async Task TheNumbersOfAFailedAttempt_DoNotCount()
+    {
+        var handler = new FakeLlmHandler((n, _) => Done(n == 1
+            ? FakeLlmHandler.Sse(Thought("reasoning_content", "twelve chars"), Raw(new { choices = Array.Empty<object>(), usage = new { completion_tokens = 99 } }), "data: [DONE]")
+            : FakeLlmHandler.Sse(FakeLlmHandler.Data("a"), "data: [DONE]")));
+        var (responder, _, _) = Make(handler);
+        var stats = new ReplyStats();
+
+        await foreach (var w in responder.StreamAsync(Context, stats, default))
+        {
+            _ = w;
+        }
+
+        Assert.Equal(2, handler.Count);
+        Assert.Equal(0, stats.ReasoningChars);
+        Assert.Null(stats.CompletionTokens);
+    }
+
     // ---------------------------------------------------------------- cancellation and load
 
     [Fact]

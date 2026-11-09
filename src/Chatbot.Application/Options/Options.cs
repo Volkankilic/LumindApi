@@ -245,6 +245,13 @@ public sealed class LlmOptions
     /// <summary>The name of the field that carries <see cref="MaxTokens"/> (some providers use <c>max_completion_tokens</c>).</summary>
     public string MaxTokensParameter { get; set; } = "max_tokens";
 
+    /// <summary>
+    /// A JSON OBJECT as text, merged into the request body next to the main fields (e.g. <c>{"chat_template_kwargs":{"enable_thinking":false}}</c>).
+    /// Empty (default): no extra field is sent. It cannot set the model, messages, stream, temperature or the token limit field
+    /// (<see cref="LlmExtraBody"/>). Not secret, but never logged.
+    /// </summary>
+    public string? ExtraBodyJson { get; set; }
+
     /// <summary>Connection plus the wait for the first word of a reply (per attempt).</summary>
     public double FirstTokenTimeoutSeconds { get; set; } = 25;
 
@@ -268,6 +275,13 @@ public sealed class LlmOptions
     {
         var copy = (LlmOptions)MemberwiseClone();
         copy.Model = model;
+        return copy;
+    }
+
+    public LlmOptions WithExtraBodyJson(string? json)
+    {
+        var copy = (LlmOptions)MemberwiseClone();
+        copy.ExtraBodyJson = json;
         return copy;
     }
 }

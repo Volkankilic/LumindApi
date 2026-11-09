@@ -90,6 +90,18 @@ dotnet user-secrets set "Llm:ApiKey" "<ANAHTAR>" --project src/Chatbot.Api
 dotnet user-secrets set "Llm:Model" "<model-adı>" --project src/Chatbot.Api
 ```
 
+**Ek istek alanları (`Llm:ExtraBodyJson`):** bazı modeller/sağlayıcılar ana alanların dışında alan ister ya da bilinmeyen alanı `400` ile reddeder; bu yüzden ek alanlar koda gömülmez, ayardan gelir. Değer bir **JSON nesnesi metnidir** ve istek gövdesine ana alanların yanına birleştirilir; **varsayılan boştur** (hiçbir ek alan gönderilmez). Örnek (EVREN `gemma-4-31b`: `reasoning_effort` alanını `400` ile reddediyor, ama bu alan düşünme/reasoning parçalarını kapatıp `200` dönüyor):
+
+```json
+{"chat_template_kwargs":{"enable_thinking":false}}
+```
+
+Kurallar (başlangıçta denetlenir; ileti yalnızca ayar adını söyler, içeriği ya da anahtar adını yazmaz): geçerli bir **JSON nesnesi** olmalı (dizi, sayı, `null` olmaz); en çok **2 KB**; en çok 8 iç içe düzey; aynı anahtar iki kez olamaz; istemcinin kendi alanlarını **geçersiz kılamaz**: `model`, `messages`, `stream`, `temperature` ve jeton sınırı alanı (`max_tokens` ve `Llm:MaxTokensParameter` ile değiştirilen ad), büyük/küçük harf fark etmeksizin.
+
+Ayarı PowerShell'de girerken dikkat: Windows PowerShell 5.1 yerel komutlara geçirilen metindeki çift tırnakları siler. Güvenli yol, nesneyi bir dosyaya yazıp değerlendirme komutuna `--extra-body` vermektir (aşağıda). Ayara yine de yazacaksanız tırnakları kaçırın: `dotnet user-secrets set "Llm:ExtraBodyJson" '{\"chat_template_kwargs\":{\"enable_thinking\":false}}' --project src/Chatbot.Api` (bu makinede denenmedi; sonucu `dotnet user-secrets list` yerine, değer gizli değil ama yine de kontrol amaçlı yalnızca anahtar adlarını listeleyerek doğrulayın).
+
+**Reasoning (düşünme) parçaları:** istemci akıştaki `delta.reasoning` ve `delta.reasoning_content` alanlarını **kullanıcıya hiçbir zaman göndermez, saklamaz ve loglamaz**; yalnızca karakter sayısını sayar. Yanıtın ilk görünür parçası yalnızca `delta.content`'e göre ölçülür (düşünme parçaları "ilk parça" sayılmaz). Model yalnızca düşünme üretip hiç `content` üretmezse sonuç `BadAnswer` olur.
+
 **Doğrulanmadı:** EVREN'in `stream: true` (SSE) ve `max_tokens` alan adı desteği henüz denenmedi (elinizdeki örnek istek bunları içermiyor). İstemci `stream: true` gönderir; EVREN akışı desteklemiyorsa ilk değerlendirme çalışmasında hata görülür (`unavailable`, `BadAnswer` ya da zaman aşımı). Jeton sınırı alan adı farklıysa `Llm:MaxTokensParameter`, sınır hiç istenmiyorsa `Llm:MaxTokens`'ı boş bırakmak yeter. Akışsız yedek mod henüz yoktur ([ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md)).
 
 `Llm:BaseUrl` ana makinesi `Llm:AllowedHosts` listesinde değilse (ya da https değilse) API **başlamaz**; ileti yalnızca ayar adını söyler. İsteğe bağlı ayarlar ve varsayılanları: `Temperature` 0,6, `MaxTokens` 400 (`MaxTokensParameter`: alan adı, varsayılan `max_tokens`), `FirstTokenTimeoutSeconds` 25, `IdleTimeoutSeconds` 20, `TotalTimeoutSeconds` 120, `MaxRetries` 2, `RetryBaseDelayMs` 500, `MaxConcurrentRequests` 8. Railway'de ad biçimi `Llm__ApiKey`, `Llm__AllowedHosts__0` vb. Ayrıntı: [ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md).
@@ -108,6 +120,13 @@ Senaryo dosyasındaki her senaryoyu listedeki her modele, sohbettekiyle aynı pa
 - **Kriz algılanan senaryo modele gönderilmez** (`crisis-intercepted` olarak kaydedilir; sohbetteki gibi).
 - **Çıktı:** `api/eval-out/<zaman>/results.jsonl` (senaryo, model, ilk parça ms, toplam ms, durum, deneme, yanıt, istem sürümü) ve `summary.md` (model başına medyan/p95). Klasör git'e girmez; `--out` yalnızca `api/eval-out/` altında ya da depo dışında olabilir. İçeriği sohbete, e-postaya ya da repoya koymayın.
 - `--prompt <dosya>`: gömülü istem yerine bir istem varyantı dener (sürüm etiketi ve özeti sonuçta kayıtlıdır).
+- `--extra-body <dosya.json>`: dosyadaki JSON nesnesi `Llm:ExtraBodyJson` ayarının **yerine** kullanılır (aynı doğrulamalar: nesne, en çok 2 KB, ayrılmış alan yok). Dosya yalnızca okunur, içeriği konsola yazılmaz; konsol yalnızca **üst düzey anahtar adlarını** gösterir (`Ek istek alanları (yalnızca adlar): …`). Boş dosya "hiç ek alan yok" demektir (ayardaki değer de devre dışı kalır). Her model için ayrı bir dosyayla ayrı çalıştırma yapılabilir; örneğin:
+
+  ```powershell
+  # D:\Uygulamalar\lumind-eval\gemma-extra.json  içeriği:  {"chat_template_kwargs":{"enable_thinking":false}}
+  dotnet run --project src/Chatbot.Api --no-launch-profile -- evaluate-models --scenarios "<senaryolar.json>" --models "gemma-4-31b" --extra-body "D:\Uygulamalar\lumind-eval\gemma-extra.json"
+  ```
+- **Sonuç satırlarındaki sayılar** (`results.jsonl`, yanıt metnine dokunmadan): `completionTokens` (sunucunun `usage.completion_tokens` değeri; sunucu göndermezse `null`), `reasoningChars` (akışın `reasoning` / `reasoning_content` alanlarından gelen toplam **karakter sayısı**; içerik kaydedilmez), `extraBodyKeys` (gönderilen ek alanların yalnızca **adları**, değerleri değil). `summary.md` model başına medyan jeton ve medyan `reasoningChars` ekler. Çoğu sunucu akışta `usage` göndermez; istemek için ek alan olarak `{"stream_options":{"include_usage":true}}` eklenebilir (sunucu bu alanı kabul ediyorsa; EVREN'de denenmedi).
 
 Senaryo dosyası biçimi:
 

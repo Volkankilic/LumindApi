@@ -142,6 +142,52 @@ public class ModelPipelineTests
         Assert.Single(rig.Store.Messages, m => m.Role == MessageRole.Assistant);
     }
 
+    // ---------------------------------------------------------------- reasoning never reaches the participant
+
+    [Fact]
+    public async Task TheReasoningOfAModel_NeverReachesTheParticipant_NorTheStoredReply()
+    {
+        string Thought(string field, string text) =>
+            "data: " + System.Text.Json.JsonSerializer.Serialize(new { choices = new[] { new { delta = new Dictionary<string, string> { [field] = text } } } });
+        var handler = new FakeLlmHandler((_, _) => Task.FromResult(FakeLlmHandler.Sse(
+            Thought("reasoning_content", "SECRET-THINKING Önce düşünelim"),
+            Thought("reasoning", "SECRET-THINKING ikinci düşünce"),
+            FakeLlmHandler.Data("Buradayım"),
+            Thought("reasoning_content", "SECRET-THINKING üçüncü"),
+            FakeLlmHandler.Data(" ve dinliyorum."),
+            "data: [DONE]")));
+        var options = new LlmOptions
+        {
+            Provider = "OpenAiCompatible",
+            BaseUrl = "https://llm.example.test/v1",
+            AllowedHosts = ["llm.example.test"],
+            Model = "test-model-x",
+            ApiKey = "sk-TEST-KEY-123456789",
+            ExtraBodyJson = """{"chat_template_kwargs":{"enable_thinking":false}}""",
+        };
+        // a REAL responder over a scripted network, behind the real send pipeline
+        var real =new Chatbot.Infrastructure.Chat.Llm.OpenAiCompatibleChatResponder(
+            Chatbot.Infrastructure.Chat.Llm.LlmHttpClient.Create(handler),
+            options,
+            Chatbot.Infrastructure.Chat.Llm.SystemPromptText.LoadEmbedded(),
+            new ListLogger<Chatbot.Infrastructure.Chat.Llm.OpenAiCompatibleChatResponder>(),
+            development: false);
+        var store = new MemoryChatStore();
+        var service = new ChatService(store, new NoopCrisisDetector(), new CrisisResponseProvider(), real, new NoopPiiRedactor(), new NoopDevChatTriggers(), new ConversationLocks(), new ChatOptions());
+        var events = new List<ChatEvent>();
+        await foreach (var e in service.SendAsync(store.OwnerId, store.Conversation.Id, "merhaba", Guid.NewGuid(), default))
+        {
+            events.Add(e);
+        }
+
+        Assert.Equal("Buradayım ve dinliyorum.", Joined(events));
+        var stored = store.Messages.Last(m => m.Role == MessageRole.Assistant);
+        Assert.Equal("Buradayım ve dinliyorum.", stored.Content);
+        Assert.DoesNotContain(events.OfType<ChatEvent.Delta>(), d => d.Text.Contains("THINKING", StringComparison.Ordinal));
+        Assert.DoesNotContain(store.Messages, m => m.Content.Contains("THINKING", StringComparison.Ordinal));
+        Assert.Equal(real.PromptVersion, stored.SystemPromptVersion);
+    }
+
     // ---------------------------------------------------------------- crisis stays in front of the model
 
     [Fact]

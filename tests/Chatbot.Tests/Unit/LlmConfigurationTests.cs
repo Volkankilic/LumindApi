@@ -280,6 +280,71 @@ public class LlmConfigurationTests
         Assert.DoesNotContain(SecretValue, ex.Message, StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------- Llm:ExtraBodyJson
+
+    [Fact]
+    public void ByDefault_NoExtraFieldIsConfigured_AndNothingIsChecked()
+    {
+        Assert.Null(new LlmOptions().ExtraBodyJson);
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(), development: false));
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(o => o.ExtraBodyJson = "   "), development: false));
+        Assert.Empty(OptionsValidator.ValidateLlm(Real(o => o.ExtraBodyJson = "{}"), development: false));
+    }
+
+    [Fact]
+    public void TheEvrenGemmaExample_IsValid()
+    {
+        Assert.Empty(OptionsValidator.ValidateLlm(
+            Real(o => o.ExtraBodyJson = """{"chat_template_kwargs":{"enable_thinking":false}}"""), development: false));
+    }
+
+    [Theory]
+    [InlineData("""{"model":"x"}""")]
+    [InlineData("""{"messages":[]}""")]
+    [InlineData("""{"stream":false}""")]
+    [InlineData("""{"max_tokens":1}""")]
+    [InlineData("""{"temperature":0}""")]
+    [InlineData("""{"Max_Tokens":1}""")]
+    [InlineData("{ broken SECRET-JSON-TEXT")]
+    [InlineData("[]")]
+    [InlineData("\"SECRET-JSON-TEXT\"")]
+    [InlineData("""{"a":1,"a":2}""")]
+    public void ABadExtraBody_IsRefused_NamingTheSettingButNoKeyValueOrText(string json)
+    {
+        var problems = OptionsValidator.ValidateLlm(Real(o => o.ExtraBodyJson = json), development: false);
+
+        Assert.Single(problems);
+        Assert.Contains("Llm:ExtraBodyJson", problems[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET-JSON-TEXT", problems[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("broken", problems[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheTokenFieldNameFromTheSettingsIsReserved_AndTheLimitIsTwoKilobytes()
+    {
+        Assert.NotEmpty(OptionsValidator.ValidateLlm(Real(o =>
+        {
+            o.MaxTokensParameter = "max_completion_tokens";
+            o.ExtraBodyJson = """{"max_completion_tokens":1}""";
+        }), development: false));
+        Assert.NotEmpty(OptionsValidator.ValidateLlm(Real(o => o.ExtraBodyJson = "{\"p\":\"" + new string('x', 2100) + "\"}"), development: false));
+    }
+
+    [Fact]
+    public void TheExtraBody_IsBoundFromConfiguration_AndAnInvalidOneStopsTheResponder()
+    {
+        var settings = Settings(RealSettings());
+        settings["Llm:ExtraBodyJson"] = """{"chat_template_kwargs":{"enable_thinking":false}}""";
+        using var good = TestServices.Build("Production", settings);
+        Assert.Equal(["chat_template_kwargs"], Assert.IsType<OpenAiCompatibleChatResponder>(good.GetRequiredService<IChatResponder>()).ExtraBodyKeys);
+
+        settings["Llm:ExtraBodyJson"] = """{"model":"override-SECRET"}""";
+        using var bad = TestServices.Build("Production", settings);
+        var ex = Assert.Throws<InvalidOperationException>(() => bad.GetRequiredService<IChatResponder>());
+        Assert.Contains("Llm:ExtraBodyJson", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("override-SECRET", ex.Message, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- the registration
 
     private static Dictionary<string, string?> Settings(params (string Key, string Value)[] extra)

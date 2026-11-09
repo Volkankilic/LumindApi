@@ -53,6 +53,9 @@ public static class ModelEvaluationCommand
         long? FirstPartMs,
         long TotalMs,
         int Parts,
+        int? CompletionTokens,
+        long? ReasoningChars,
+        string[] ExtraBodyKeys,
         string PromptVersion,
         string? Reply);
 
@@ -96,6 +99,33 @@ public static class ModelEvaluationCommand
 
         // ---- the settings (a real call needs a base URL on the allow list and the key, whatever Llm:Provider says)
         var llm = services.GetRequiredService<LlmOptions>();
+
+        // --extra-body <file>: the object in that file REPLACES Llm:ExtraBodyJson (same checks). The path is only read; the text is never printed.
+        var extraPath = ValueOf(args, "--extra-body");
+        if (extraPath is not null)
+        {
+            if (!File.Exists(extraPath))
+            {
+                console.WriteLine("--extra-body dosyası bulunamadı.");
+                return 1;
+            }
+
+            if (new FileInfo(extraPath).Length > LlmExtraBody.MaxBytes + 3) // + a possible UTF-8 BOM
+            {
+                console.WriteLine($"--extra-body dosyası çok büyük (en çok {LlmExtraBody.MaxBytes} bayt).");
+                return 1;
+            }
+
+            var extraText = File.ReadAllText(extraPath, Encoding.UTF8);
+            if (LlmExtraBody.Parse(extraText, llm.MaxTokensParameter, "--extra-body").Problem is { } extraProblem)
+            {
+                console.WriteLine("--extra-body kullanılamıyor: " + extraProblem);
+                return 1;
+            }
+
+            llm = llm.WithExtraBodyJson(extraText);
+        }
+
         var problems = OptionsValidator.ValidateEndpoint(llm.WithModel(models[0]), development: true);
         if (problems.Count > 0)
         {
@@ -136,6 +166,12 @@ public static class ModelEvaluationCommand
         console.WriteLine(llm.UsesApiKeyHeader
             ? $"Anahtar başlığı: {llm.AuthHeaderName} (Authorization gönderilmez)"
             : "Anahtar başlığı: Authorization: Bearer");
+        var extraKeys = LlmExtraBody.Parse(llm.ExtraBodyJson, llm.MaxTokensParameter, "Llm:ExtraBodyJson").Fields.Keys.ToList();
+        if (extraKeys.Count > 0)
+        {
+            console.WriteLine($"Ek istek alanları (yalnızca adlar): {string.Join(", ", extraKeys)}");
+        }
+
         console.WriteLine($"Modeller: {string.Join(", ", models)}");
         console.WriteLine($"Senaryo sayısı: {file.Scenarios!.Count}. Yalnızca SENTETİK içerik gönderilir; sonuçlar yerelde kalır.");
         var answer = console.ReadLine("Devam etmek için tam olarak 'evet' yazın: ");
@@ -190,7 +226,7 @@ public static class ModelEvaluationCommand
         // The pipeline looks at the incoming message first: a crisis never reaches a model (the reply would be the fixed crisis text).
         if (crisis.Assess(last).IsCrisis)
         {
-            return new ResultRow(scenario.Id!, scenario.Title, model, "crisis-intercepted", null, null, 0, 0, prompt.Version, null);
+            return new ResultRow(scenario.Id!, scenario.Title, model, "crisis-intercepted", null, null, 0, 0, null, null, responder.ExtraBodyKeys.ToArray(), prompt.Version, null);
         }
 
         // The context is built exactly like the chat does: earlier crisis messages and the replies to them are left out, texts are masked.
@@ -219,25 +255,27 @@ public static class ModelEvaluationCommand
         long? first = null;
         var reply = new StringBuilder();
         var parts = 0;
+        var stats = new ReplyStats();
+        var keys = responder.ExtraBodyKeys.ToArray();
         try
         {
-            await foreach (var chunk in responder.StreamReplyAsync(context, ct))
+            await foreach (var chunk in responder.StreamAsync(context, stats, ct))
             {
                 first ??= (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 parts++;
                 reply.Append(chunk);
             }
 
-            return new ResultRow(scenario.Id!, scenario.Title, model, "ok", null, first, Elapsed(started), parts, prompt.Version, reply.ToString().Trim());
+            return new ResultRow(scenario.Id!, scenario.Title, model, "ok", null, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, reply.ToString().Trim());
         }
         catch (ModelUnavailableException ex)
         {
             return new ResultRow(
-                scenario.Id!, scenario.Title, model, "unavailable", ex.Failure + (ex.StatusCode is null ? string.Empty : " " + ex.StatusCode), first, Elapsed(started), parts, prompt.Version, parts > 0 ? reply.ToString().Trim() : null);
+                scenario.Id!, scenario.Title, model, "unavailable", ex.Failure + (ex.StatusCode is null ? string.Empty : " " + ex.StatusCode), first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, parts > 0 ? reply.ToString().Trim() : null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new ResultRow(scenario.Id!, scenario.Title, model, "error", ex.GetType().Name, first, Elapsed(started), parts, prompt.Version, null);
+            return new ResultRow(scenario.Id!, scenario.Title, model, "error", ex.GetType().Name, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, null);
         }
     }
 
@@ -313,17 +351,23 @@ public static class ModelEvaluationCommand
         text.AppendLine($"- Sistem istemi sürümü: {promptVersion}");
         text.AppendLine("- Girdiler SENTETİK senaryolardır. Bu klasör yerelde kalır; repoya, sohbete ya da e-postaya konmaz.");
         text.AppendLine();
-        text.AppendLine("| Model | Senaryo | Başarılı | Ulaşılamadı | Kriz (modele gitmedi) | Hata | İlk parça ms (medyan / p95) | Toplam ms (medyan / p95) |");
-        text.AppendLine("|---|---|---|---|---|---|---|---|");
+        text.AppendLine("| Model | Senaryo | Başarılı | Ulaşılamadı | Kriz (modele gitmedi) | Hata | İlk parça ms (medyan / p95) | Toplam ms (medyan / p95) | Jeton (medyan) | reasoningChars (medyan) |");
+        text.AppendLine("|---|---|---|---|---|---|---|---|---|---|");
         foreach (var group in rows.GroupBy(r => r.Model))
         {
             var ok = group.Where(r => r.Status == "ok").ToList();
             text.AppendLine(
                 $"| {group.Key} | {group.Count()} | {ok.Count} | {group.Count(r => r.Status == "unavailable")} | {group.Count(r => r.Status == "crisis-intercepted")} | {group.Count(r => r.Status == "error")} | "
-                + $"{Spread(ok.Where(r => r.FirstPartMs is not null).Select(r => r.FirstPartMs!.Value))} | {Spread(ok.Select(r => r.TotalMs))} |");
+                + $"{Spread(ok.Where(r => r.FirstPartMs is not null).Select(r => r.FirstPartMs!.Value))} | {Spread(ok.Select(r => r.TotalMs))} | {Median(ok.Where(r => r.CompletionTokens is not null).Select(r => (long)r.CompletionTokens!.Value))} | {Median(ok.Where(r => r.ReasoningChars is not null).Select(r => r.ReasoningChars!.Value))} |");
         }
 
         return text.ToString();
+    }
+
+    private static string Median(IEnumerable<long> values)
+    {
+        var sorted = values.Order().ToList();
+        return sorted.Count == 0 ? "-" : sorted[sorted.Count / 2].ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string Spread(IEnumerable<long> values)

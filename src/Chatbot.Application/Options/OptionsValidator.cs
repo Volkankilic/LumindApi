@@ -172,6 +172,8 @@ public static class OptionsValidator
             problems.Add("Llm:MaxRetries must be 0-5 and Llm:RetryBaseDelayMs 0-10000.");
         }
 
+        problems.AddRange(LlmExtraBody.Check(llm.ExtraBodyJson, llm.MaxTokensParameter, "Llm:ExtraBodyJson"));
+
         if (llm.MaxConcurrentRequests is < 1 or > 100)
         {
             problems.Add("Llm:MaxConcurrentRequests must be 1-100.");

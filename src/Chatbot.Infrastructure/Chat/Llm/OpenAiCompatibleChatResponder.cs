@@ -31,6 +31,7 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
     private readonly ILogger<OpenAiCompatibleChatResponder> _logger;
     private readonly SemaphoreSlim _gate;
     private readonly Uri _endpoint;
+    private readonly IReadOnlyDictionary<string, JsonElement> _extra;
 
     public OpenAiCompatibleChatResponder(
         HttpClient http,
@@ -52,11 +53,22 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
         _logger = logger;
         _gate = new SemaphoreSlim(options.MaxConcurrentRequests, options.MaxConcurrentRequests);
         _endpoint = new Uri(options.BaseUrl!.Trim().TrimEnd('/') + "/chat/completions");
+        _extra = LlmExtraBody.Parse(options.ExtraBodyJson, options.MaxTokensParameter, "Llm:ExtraBodyJson").Fields; // validated above
     }
 
     public string? PromptVersion => _prompt.Version;
 
-    public async IAsyncEnumerable<string> StreamReplyAsync(ConversationContext context, [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>The NAMES of the extra body fields that are sent (never their values).</summary>
+    public IReadOnlyList<string> ExtraBodyKeys => [.. _extra.Keys];
+
+    public IAsyncEnumerable<string> StreamReplyAsync(ConversationContext context, CancellationToken ct) =>
+        StreamAsync(context, new ReplyStats(), ct);
+
+    /// <summary>
+    /// The reply as words, like <see cref="StreamReplyAsync"/>, and fills <paramref name="stats"/> on the way (token count the server reports,
+    /// characters of reasoning it streamed). Only the "content" of a reply is ever yielded: the reasoning is counted and dropped.
+    /// </summary>
+    public async IAsyncEnumerable<string> StreamAsync(ConversationContext context, ReplyStats stats, [EnumeratorCancellation] CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
         if (!await _gate.WaitAsync(Seconds(_options.FirstTokenTimeoutSeconds), ct))
@@ -68,7 +80,7 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
         try
         {
             var body = BuildBody(context);
-            await using var reply = await StartAsync(body, started, ct);
+            await using var reply = await StartAsync(body, started, stats, ct);
             var parts = 1;
             yield return reply.First;
             while (await reply.NextAsync(ct) is { } next)
@@ -116,18 +128,26 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             body[_options.MaxTokensParameter] = maxTokens;
         }
 
+        // The extra fields of the settings, next to the main ones. They cannot replace a main field (checked at startup);
+        // TryAdd keeps that true even if a check were ever loosened.
+        foreach (var (name, value) in _extra)
+        {
+            body.TryAdd(name, value);
+        }
+
         return JsonSerializer.Serialize(body);
     }
 
     // ---------------------------------------------------------------- retry (before the first word only)
 
-    private async Task<ReplyStream> StartAsync(string body, long started, CancellationToken ct)
+    private async Task<ReplyStream> StartAsync(string body, long started, ReplyStats stats, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                return await TryStartAsync(body, started, attempt, ct);
+                stats.Reset(); // the numbers of a failed attempt do not count
+                return await TryStartAsync(body, started, attempt, stats, ct);
             }
             catch (ModelUnavailableException ex) when (IsRetryable(ex.Failure) && attempt <= _options.MaxRetries)
             {
@@ -167,7 +187,7 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
     }
 
     /// <summary>One attempt: connect, send, and wait for the FIRST word. The caller sees a started reply or a categorised failure.</summary>
-    private async Task<ReplyStream> TryStartAsync(string body, long started, int attempt, CancellationToken ct)
+    private async Task<ReplyStream> TryStartAsync(string body, long started, int attempt, ReplyStats stats, CancellationToken ct)
     {
         var attemptStarted = Stopwatch.GetTimestamp();
         var firstTimeout = Seconds(_options.FirstTokenTimeoutSeconds);
@@ -214,7 +234,8 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
                 new StreamReader(stream, Encoding.UTF8),
                 Seconds(_options.IdleTimeoutSeconds),
                 started + (long)(Seconds(_options.TotalTimeoutSeconds).TotalSeconds * Stopwatch.Frequency),
-                attempt);
+                attempt,
+                stats);
             response = null; // owned by the reply stream from here on
 
             try
@@ -284,18 +305,25 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
         Bad,
     }
 
-    /// <summary>One line of a server sent events stream. Anything that is not a <c>data:</c> line, and any event without a word, is skipped.</summary>
-    internal static (EventKind Kind, string? Text) ParseLine(string line)
+    /// <summary>What one line of the stream says. <c>ReasoningChars</c> is a LENGTH: the reasoning text itself is never returned.</summary>
+    internal readonly record struct SseEvent(EventKind Kind, string? Text = null, int ReasoningChars = 0, int? CompletionTokens = null);
+
+    /// <summary>
+    /// One line of a server sent events stream. Only <c>delta.content</c> is ever returned as text. The reasoning fields
+    /// (<c>reasoning</c>, <c>reasoning_content</c>) are only counted (characters) and dropped: they never reach a participant, a log or a file.
+    /// Anything that is not a <c>data:</c> line, and any event without a word, is skipped.
+    /// </summary>
+    internal static SseEvent ParseLine(string line)
     {
         if (line.Length == 0 || line[0] == ':' || !line.StartsWith("data:", StringComparison.Ordinal))
         {
-            return (EventKind.Skip, null);
+            return new SseEvent(EventKind.Skip);
         }
 
         var payload = line[5..].Trim();
         if (payload == "[DONE]")
         {
-            return (EventKind.Done, null);
+            return new SseEvent(EventKind.Done);
         }
 
         try
@@ -304,31 +332,55 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || root.TryGetProperty("error", out _))
             {
-                return (EventKind.Bad, null);
+                return new SseEvent(EventKind.Bad);
             }
 
+            int? tokens = root.TryGetProperty("usage", out var usage)
+                && usage.ValueKind == JsonValueKind.Object
+                && usage.TryGetProperty("completion_tokens", out var count)
+                && count.ValueKind == JsonValueKind.Number
+                && count.TryGetInt32(out var n)
+                ? n
+                : null;
+
+            var reasoning = 0;
+            string? text = null;
             if (root.TryGetProperty("choices", out var choices)
                 && choices.ValueKind == JsonValueKind.Array
                 && choices.GetArrayLength() > 0
                 && choices[0].ValueKind == JsonValueKind.Object
                 && choices[0].TryGetProperty("delta", out var delta)
-                && delta.ValueKind == JsonValueKind.Object
-                && delta.TryGetProperty("content", out var content)
-                && content.ValueKind == JsonValueKind.String
-                && content.GetString() is { Length: > 0 } text)
+                && delta.ValueKind == JsonValueKind.Object)
             {
-                return (EventKind.Content, text);
+                foreach (var field in ReasoningFields)
+                {
+                    if (delta.TryGetProperty(field, out var thought) && thought.ValueKind == JsonValueKind.String)
+                    {
+                        reasoning += thought.GetString()!.Length; // the length only
+                    }
+                }
+
+                if (delta.TryGetProperty("content", out var content)
+                    && content.ValueKind == JsonValueKind.String
+                    && content.GetString() is { Length: > 0 } word)
+                {
+                    text = word;
+                }
             }
 
-            return (EventKind.Skip, null); // role only, finish reason, usage, an empty word
+            return text is null
+                ? new SseEvent(EventKind.Skip, null, reasoning, tokens) // role only, finish reason, usage, reasoning, an empty word
+                : new SseEvent(EventKind.Content, text, reasoning, tokens);
         }
         catch (JsonException)
         {
-            return (EventKind.Bad, null);
+            return new SseEvent(EventKind.Bad);
         }
     }
 
-    private sealed class ReplyStream(HttpResponseMessage response, StreamReader reader, TimeSpan idle, long deadline, int attempts) : IAsyncDisposable
+    private static readonly string[] ReasoningFields = ["reasoning", "reasoning_content"];
+
+    private sealed class ReplyStream(HttpResponseMessage response, StreamReader reader, TimeSpan idle, long deadline, int attempts, ReplyStats stats) : IAsyncDisposable
     {
         private bool _done;
 
@@ -370,11 +422,17 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
                 limit.CancelAfter(wait);
                 while (await reader.ReadLineAsync(limit.Token) is { } line)
                 {
-                    var (kind, text) = ParseLine(line);
-                    switch (kind)
+                    var parsed = ParseLine(line);
+                    stats.ReasoningChars += parsed.ReasoningChars;
+                    if (parsed.CompletionTokens is { } tokens)
+                    {
+                        stats.CompletionTokens = tokens;
+                    }
+
+                    switch (parsed.Kind)
                     {
                         case EventKind.Content:
-                            return text;
+                            return parsed.Text;
                         case EventKind.Done:
                             _done = true;
                             return null;
