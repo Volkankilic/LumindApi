@@ -185,6 +185,12 @@ public sealed class ChatOptions
     /// <summary>Per participant.</summary>
     public int MessagesPerMinute { get; set; } = 20;
 
+    /// <summary>
+    /// How often the reply stream sends a content-free `: ping` comment line while it waits (a model can need up to ~40 s for its first word).
+    /// Must stay well below the client's 45 s "no byte at all" limit and below any proxy idle timeout.
+    /// </summary>
+    public double KeepAliveSeconds { get; set; } = 10;
+
     public FakeChatOptions Fake { get; set; } = new();
 }
 

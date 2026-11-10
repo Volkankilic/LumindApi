@@ -441,13 +441,13 @@ public class LlmConfigurationTests
     {
         var prompt = SystemPromptText.LoadEmbedded();
 
-        Assert.Matches(new Regex("^v2\\+[0-9a-f]{8}$"), prompt.Version);
+        Assert.Matches(new Regex("^v3\\+[0-9a-f]{8}$"), prompt.Version);
         Assert.True(prompt.Version.Length <= 64);
         Assert.Equal(prompt.Version, SystemPromptText.LoadEmbedded().Version); // stable
 
         var edited = new SystemPromptText(RawPrompt() + "\nbir cümle daha");
         Assert.NotEqual(prompt.Version, edited.Version); // an edit that forgot the label still gets a new version
-        Assert.StartsWith("v2+", edited.Version, StringComparison.Ordinal);
+        Assert.StartsWith("v3+", edited.Version, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -455,7 +455,9 @@ public class LlmConfigurationTests
     {
         Assert.Contains("TODO(volkan): metin onayı", RawPrompt(), StringComparison.Ordinal);
         Assert.Contains("TODO(volkan): klinik uzman onayı", RawPrompt(), StringComparison.Ordinal);
-        Assert.Contains("TODO(volkan): klinik onay:", RawPrompt(), StringComparison.Ordinal); // the safety question and treatment rules of v2
+        // the safety question (open and indirect expressions) and the treatment rules wait for clinical approval: one mark each
+        Assert.Contains("TODO(volkan): klinik onay: \"Umutsuzluk ifadeleri\"", RawPrompt(), StringComparison.Ordinal);
+        Assert.Contains("TODO(volkan): klinik onay: \"Tedaviyi bırakma ya da değiştirme\"", RawPrompt(), StringComparison.Ordinal);
 
         var text = SystemPromptText.LoadEmbedded().Text;
         Assert.DoesNotContain("TODO", text, StringComparison.Ordinal);
@@ -501,7 +503,8 @@ public class LlmConfigurationTests
     public void ThePrompt_IsShort_SoTheReplyToo()
     {
         var text = SystemPromptText.LoadEmbedded().Text;
-        Assert.InRange(text.Length, 500, 6000);
+        // v1 4.5k, v2 5.2k, v3 6.5k characters (the open/indirect safety steps and the treatment steps are spelled out). The ceiling only catches bloat.
+        Assert.InRange(text.Length, 500, 7500);
         Assert.Contains("3-5 cümle", text, StringComparison.Ordinal);
     }
 
@@ -568,9 +571,18 @@ public class LlmConfigurationTests
     {
         var section = Section(SystemPromptText.LoadEmbedded().Text, "Tedaviyi bırakma ya da değiştirme");
 
-        Assert.Contains("bu isteği onaylama ve meşrulaştırma", section, StringComparison.Ordinal);
+        // v3: reflect the tiredness or fear first, never approve, never be harsh, the team in a soft but clear way, end on a question about the feeling
+        var reflect = section.IndexOf("Önce arkasındaki yorgunluğu ya da korkuyu", StringComparison.Ordinal);
+        var team = section.IndexOf("Karar vermeden önce tedavi ekibiyle konuşmanın önemini net ama yumuşak bir dille söyle", StringComparison.Ordinal);
+        var question = section.IndexOf("Yanıtı kişinin duygusuna dönen bir soruyla bitir", StringComparison.Ordinal);
+        Assert.True(reflect >= 0 && team > reflect && question > team, "the three steps must be there, in this order");
+
+        Assert.Contains("Bu isteği onaylama ve meşrulaştırma", section, StringComparison.Ordinal);
         Assert.Contains("\"bu çok insani\"", section, StringComparison.Ordinal);
-        Assert.Contains("karar vermeden önce tedavi ekibiyle konuşması gerektiğini nazikçe ama net söyle", section, StringComparison.Ordinal);
+        Assert.Contains("Sert de olma", section, StringComparison.Ordinal);
+        var harsh = section.Split('\n').Single(l => l.Contains("Sert de olma", StringComparison.Ordinal));
+        Assert.Contains("\"onaylamam mümkün değil\"", harsh, StringComparison.Ordinal); // named as something NOT to say
+        Assert.Contains("emir kipi", harsh, StringComparison.Ordinal);
         Assert.Contains("alternatif önerme", section, StringComparison.Ordinal);
     }
 
@@ -580,22 +592,130 @@ public class LlmConfigurationTests
         var text = SystemPromptText.LoadEmbedded().Text;
         var section = Section(text, "Umutsuzluk ifadeleri (kriz belirtisi)");
 
-        foreach (var sign in new[] { "yük olmak istemiyorum", "bensiz daha iyi olur", "yoruldum, bitsin" })
-        {
-            Assert.Contains($"\"{sign}\"", section, StringComparison.Ordinal);
-        }
-
-        Assert.Contains("Yargılamadan", section, StringComparison.Ordinal);
-        var noComfort = section.Split('\n').Single(l => l.Contains("Gerçekçi olmayan teselli verme", StringComparison.Ordinal));
-        Assert.Contains("\"senin varlığın kıymetli\"", noComfort, StringComparison.Ordinal); // named as something NOT to say
-        Assert.Contains("Kendine zarar vermeyi düşünüyor musun?", section, StringComparison.Ordinal);
-        Assert.Contains("Soruyu dolaylı bırakma", section, StringComparison.Ordinal);
-        Assert.Contains("112'yi aramasını", section, StringComparison.Ordinal);
-        Assert.Contains("yakın birine", section, StringComparison.Ordinal);
+        // both kinds of expression: no judgement, no comforting sentence, no verdict (the verdict example is named as something NOT to say)
+        var intro = section.Split('\n').Single(l => l.Contains("İki durumda da", StringComparison.Ordinal));
+        Assert.Contains("yargılama, teselli cümlesi kurma ve kesin hüküm verme", intro, StringComparison.Ordinal);
+        Assert.Contains("\"senin varlığın kıymetli\"", intro, StringComparison.Ordinal);
 
         // the safety rule waits for clinical approval: the mark is in the file, never sent to the model
         Assert.Contains("TODO(volkan): klinik onay: \"Umutsuzluk ifadeleri\"", RawPrompt(), StringComparison.Ordinal);
         Assert.DoesNotContain("TODO", text, StringComparison.Ordinal);
+    }
+
+    private static (string Open, string Indirect, string Tail) Hopelessness(string text)
+    {
+        var section = Section(text, "Umutsuzluk ifadeleri (kriz belirtisi)");
+        var open = section.IndexOf("Açık ifadeler:", StringComparison.Ordinal);
+        var indirect = section.IndexOf("Dolaylı ifadeler:", StringComparison.Ordinal);
+        var tail = section.IndexOf("Kişi güvenlik sorusuna", StringComparison.Ordinal);
+        Assert.True(open >= 0 && indirect > open && tail > indirect, "open, indirect and the 'no' answer must be there, in this order");
+        return (section[open..indirect], section[indirect..tail], section[tail..]);
+    }
+
+    [Fact]
+    public void OpenHopelessness_GetsAReflection_TheDirectSafetyQuestion_AndIn_TheSameReply_WithoutWaiting_112AndSomeoneClose()
+    {
+        var (open, _, _) = Hopelessness(SystemPromptText.LoadEmbedded().Text);
+
+        foreach (var sign in new[] { "bensiz daha iyi olur", "bitsin", "yok olsam" })
+        {
+            Assert.Contains($"\"{sign}\"", open, StringComparison.Ordinal);
+        }
+
+        var reflect = open.IndexOf("Kişinin kendi sözlerini yargılamadan yansıt", StringComparison.Ordinal);
+        var ask = open.IndexOf("Doğrudan güvenlik sorusunu sor: \"Kendine zarar vermeyi düşünüyor musun?\"", StringComparison.Ordinal);
+        var call = open.IndexOf("Kişinin cevabını BEKLEMEDEN, aynı yanıtta 112'yi aramasını ve yanındaki güvendiği birine haber vermesini söyle", StringComparison.Ordinal);
+        Assert.True(reflect >= 0 && ask > reflect && call > ask, "reflect, ask, then 112 and someone close, in this order");
+        Assert.Contains("Soruyu dolaylı bırakma", open, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IndirectHopelessness_GetsAReflection_AGentleSafetyQuestion_AndASoft112Sentence_ThatDoesNotWaitOrCommand()
+    {
+        var (_, indirect, _) = Hopelessness(SystemPromptText.LoadEmbedded().Text);
+
+        foreach (var sign in new[] { "yük olmak istemiyorum", "kimseyle konuşmuyorum", "çok yoruldum" })
+        {
+            Assert.Contains($"\"{sign}\"", indirect, StringComparison.Ordinal);
+        }
+
+        var reflect = indirect.IndexOf("Kişinin kendi sözlerini yansıt", StringComparison.Ordinal);
+        var ask = indirect.IndexOf("Nazikçe güvenlik sorusunu sor (\"Kendine zarar vermeyi düşünüyor musun?\"", StringComparison.Ordinal);
+        var soft = indirect.IndexOf(
+            "112 için yumuşak bir cümle ekle: \"Kendine zarar verme düşüncen güçlenirse 112'yi arayabilir ya da yakınındaki birine hemen haber verebilirsin.\"",
+            StringComparison.Ordinal);
+        Assert.True(reflect >= 0 && ask > reflect && soft > ask, "reflect, gently ask, then the soft 112 sentence, in this order");
+
+        // the hard version (112 NOW, without waiting) belongs to the open expressions only
+        Assert.DoesNotContain("BEKLEMEDEN", indirect, StringComparison.Ordinal);
+        Assert.DoesNotContain("Lütfen hemen", indirect, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WhenThePersonAnswersNoToTheSafetyQuestion_NoJudgement_NoRepeatedQuestion_StayWithTheFeeling()
+    {
+        var (_, _, tail) = Hopelessness(SystemPromptText.LoadEmbedded().Text);
+
+        Assert.Contains("güvenlik sorusuna \"hayır\" derse yargılama, soruyu tekrarlama, o duygunun yanında kal", tail, StringComparison.Ordinal);
+        Assert.Contains("konuyu hafifletme", tail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheAddress_IsAlwaysSen_AndThePromptItselfNeverSaysSiz()
+    {
+        var text = SystemPromptText.LoadEmbedded().Text;
+        var format = Section(text, "Yanıtın biçimi");
+
+        var rule = format.Split('\n').Single(l => l.StartsWith("- Hitap her zaman \"sen\"", StringComparison.Ordinal));
+        foreach (var banned in new[] { "\"siz\"", "\"doktorunuz\"", "\"tedavinizle\"", "\"paylaşın\"" })
+        {
+            Assert.Contains(banned, rule, StringComparison.Ordinal); // named as things not to say
+        }
+
+        Assert.Contains("\"doktorun\"", rule, StringComparison.Ordinal);
+        Assert.Contains("\"tedavinle\"", rule, StringComparison.Ordinal);
+
+        // outside the quoted examples the prompt speaks to the model in the plain "sen" form too
+        var unquoted = new Regex("\"[^\"]*\"").Replace(text, string.Empty);
+        Assert.DoesNotMatch(new Regex("\\b(doktorunuz|tedavinizle|paylaşın|yapınız|sizi|sizin|siz)\\b", RegexOptions.IgnoreCase), unquoted);
+    }
+
+    [Fact]
+    public void NamesThePersonGave_AreNotRepeated_GenericWordsAreUsedInstead_AndThePromptHasNoRealNamesOfItsOwn()
+    {
+        var rules = Section(SystemPromptText.LoadEmbedded().Text, "Yapmayacakların (kesin kurallar)");
+
+        var rule = rules.Split('\n').Single(l => l.Contains("kişi, doktor ve yer adlarını", StringComparison.Ordinal));
+        Assert.Contains("yanıtında yineleme", rule, StringComparison.Ordinal);
+        foreach (var generic in new[] { "\"kızın\"", "\"eşin\"", "\"doktorun\"", "\"hastane\"" })
+        {
+            Assert.Contains(generic, rule, StringComparison.Ordinal);
+        }
+
+        // the old rule stays too (do not ask for identity data; do not repeat what is given)
+        Assert.Contains("Kişi kendiliğinden verirse tekrar etme.", rules, StringComparison.Ordinal);
+
+        // the examples are kinds of names, never a real name that a model could copy
+        foreach (var name in new[] { "Elif", "Ahmet", "Kadıköy", "Ayşe", "Mehmet", "İstanbul", "Ankara" })
+        {
+            Assert.DoesNotContain(name, SystemPromptText.LoadEmbedded().Text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void TheReminderCrisisStockPhraseAndLengthRules_OfV2_StayInV3()
+    {
+        var text = SystemPromptText.LoadEmbedded().Text;
+        var format = Section(text, "Yanıtın biçimi");
+
+        Assert.Contains("yalnızca şu durumlarda söyle; diğer yanıtlarda söyleme", Section(text, "Yapay zekâ olduğunu hatırlatma"), StringComparison.Ordinal);
+        foreach (var phrase in new[] { "çok doğal", "çok kıymetli", "çok anlaşılır", "çok insani", "gerçekten değerli" })
+        {
+            Assert.Contains($"\"{phrase}\"", format, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("en çok 3-5 cümle", format, StringComparison.Ordinal);
+        Assert.Contains("Düz yazı", format, StringComparison.Ordinal);
     }
 
     [Fact]

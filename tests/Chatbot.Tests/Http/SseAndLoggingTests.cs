@@ -49,6 +49,59 @@ public class SseEndpointTests
         });
     }
 
+    /// <summary>`accepted`, then silence (a model that has not written its first word yet), then the reply.</summary>
+    private static async IAsyncEnumerable<ChatEvent> SlowReply(TimeSpan firstWordAfter)
+    {
+        yield return new ChatEvent.Accepted(UserMessage);
+        await Task.Delay(firstWordAfter);
+        yield return new ChatEvent.Delta("Merhaba");
+        yield return new ChatEvent.Done(AssistantMessage);
+    }
+
+    [Fact]
+    public async Task WhileTheModelIsSilent_TheStreamSendsContentFreePingComments_BetweenAcceptedAndTheFirstWord()
+    {
+        using var factory = new ApiFactory(settings: new() { ["Chat:KeepAliveSeconds"] = "0.05" });
+        factory.Chat.Handler = _ => SlowReply(TimeSpan.FromMilliseconds(700));
+
+        var text = await (await factory.Authed().PostAsync(Url, Body())).Content.ReadAsStringAsync();
+
+        var blocks = text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+        var pings = blocks.Where(b => b.StartsWith(':')).ToList();
+        Assert.True(pings.Count >= 3, $"expected several pings during a 700 ms silence, got {pings.Count}");
+        Assert.All(pings, ping => Assert.Equal(": ping", ping)); // a comment line only: no event name, no data, no text of any kind
+        var firstPing = Array.FindIndex(blocks, b => b.StartsWith(':'));
+        var firstDelta = Array.FindIndex(blocks, b => b.StartsWith("event: delta", StringComparison.Ordinal));
+        Assert.True(Array.FindIndex(blocks, b => b.StartsWith("event: accepted", StringComparison.Ordinal)) < firstPing, "the first ping comes after accepted");
+        Assert.True(firstPing < firstDelta, "the pings fill the silence BEFORE the first word");
+        Assert.Equal(["event: accepted", "event: delta", "event: done"], blocks.Where(b => b.StartsWith("event:", StringComparison.Ordinal)).Select(b => b.Split('\n')[0]).ToArray());
+    }
+
+    [Fact]
+    public async Task AFastReply_HasNoPing_AndTheDefaultIntervalIsTenSeconds()
+    {
+        Assert.Equal(10, new Chatbot.Application.Options.ChatOptions().KeepAliveSeconds);
+
+        using var factory = new ApiFactory();
+        factory.Chat.Handler = _ => StubChatService.Events(new ChatEvent.Accepted(UserMessage), new ChatEvent.Delta("x"), new ChatEvent.Done(AssistantMessage));
+
+        var text = await (await factory.Authed().PostAsync(Url, Body())).Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain(": ping", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("0.01")]
+    [InlineData("31")]
+    [InlineData("45")] // the client gives up after 45 s without a byte: a ping that rare would not help
+    public async Task AKeepAliveIntervalThatIsTooShortOrTooLong_StopsTheApplication_NamingTheSetting(string seconds)
+    {
+        var message = await FailedStart.TextAsync(() => new ApiFactory(settings: new() { ["Chat:KeepAliveSeconds"] = seconds }));
+
+        Assert.Contains("Chat:KeepAliveSeconds", message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ACrisisStream_HasTheCrisisEventBetweenAcceptedAndTheFirstDelta()
     {

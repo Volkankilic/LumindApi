@@ -4,6 +4,7 @@ using Chatbot.Api.Startup;
 using Chatbot.Application;
 using Chatbot.Application.Chat;
 using Chatbot.Application.Conversations;
+using Chatbot.Application.Options;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -19,9 +20,8 @@ namespace Chatbot.Api.Controllers;
 [Route("api/conversations")]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-public class ConversationsController(IConversationService conversations, IChatService chat) : ControllerBase
+public class ConversationsController(IConversationService conversations, IChatService chat, ChatOptions options) : ControllerBase
 {
-    private static readonly TimeSpan PingInterval = TimeSpan.FromSeconds(15);
 
     /// <summary>Starts a conversation. The participant's previous active conversation ends in the same step.</summary>
     [HttpPost]
@@ -90,7 +90,7 @@ public class ConversationsController(IConversationService conversations, IChatSe
         sse.Start(HttpContext);
 
         using var pings = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var keepAlive = KeepAliveAsync(sse, pings.Token);
+        var keepAlive = KeepAliveAsync(sse, TimeSpan.FromSeconds(options.KeepAliveSeconds), pings.Token);
         try
         {
             await sse.WriteAsync(events.Current, ct);
@@ -127,11 +127,16 @@ public class ConversationsController(IConversationService conversations, IChatSe
         }
     }
 
-    private static async Task KeepAliveAsync(SseWriter sse, CancellationToken ct)
+    /// <summary>
+    /// A `: ping` comment line every <c>Chat:KeepAliveSeconds</c> (default 10) from the moment the stream starts until it ends. It carries no
+    /// content. It keeps an idle proxy (Railway edge, Caddy) from closing the connection while the model has not written its first word yet
+    /// (that can take 40 s), and it keeps the client from taking the silence for a lost connection (it gives up after 45 s without a byte).
+    /// </summary>
+    private static async Task KeepAliveAsync(SseWriter sse, TimeSpan interval, CancellationToken ct)
     {
         try
         {
-            using var timer = new PeriodicTimer(PingInterval);
+            using var timer = new PeriodicTimer(interval);
             while (await timer.WaitForNextTickAsync(ct))
             {
                 await sse.WritePingAsync(ct);

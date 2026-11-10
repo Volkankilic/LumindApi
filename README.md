@@ -184,6 +184,7 @@ OpenAPI belgesi **yalnızca Development'ta** `GET /openapi/v1.json` adresindedir
 | `Auth:CodeAttempts` / `Auth:CodeWindowSeconds` (`Auth__CodeAttempts` …) | 5 / 30 sn, IP başına |
 | `Auth:RefreshAttempts` / `Auth:RefreshWindowSeconds` | 30 / 60 sn, IP başına |
 | `Chat:MessagesPerMinute` | 20, katılımcı başına |
+| `Chat:KeepAliveSeconds` (`Chat__KeepAliveSeconds`) | 10 sn (geçerli aralık 0,05-30). Yanıt akışı, model ilk kelimeyi üretene kadar bu aralıkla içeriksiz bir `: ping` yorum satırı gönderir; proxy (Railway kenarı, Caddy) boşta kalan bağlantıyı kapatmasın ve istemci sessizliği bağlantı kaybı sanmasın (istemci 45 sn hiç bayt gelmezse vazgeçer). Hız sınırı değildir, ama aynı yerde durur. |
 
 Uçtan uca testler aynı IP'den çok sayıda giriş yaptığı için API bu sınırlar yükseltilerek başlatılır (örn. `Auth__CodeAttempts=1000`); hız sınırı senaryosu varsayılanlarla ayrı bir koşuda çalışır (bkz. client/README).
 

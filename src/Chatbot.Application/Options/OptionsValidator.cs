@@ -67,6 +67,11 @@ public static class OptionsValidator
                 problems.Add("Chat:ContextMessages, Chat:MaxMessageLength and Chat:MessagesPerMinute must be positive.");
             }
 
+            if (chat.KeepAliveSeconds is < 0.05 or > 30)
+            {
+                problems.Add("Chat:KeepAliveSeconds must be between 0.05 and 30 (the client gives up after 45 seconds without a byte).");
+            }
+
             if (production && !auth.CookieSecure)
             {
                 // The refresh cookie must never travel over plain http in a deployed environment.
