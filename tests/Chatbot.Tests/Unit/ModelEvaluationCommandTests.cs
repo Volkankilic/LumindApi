@@ -302,7 +302,7 @@ public class ModelEvaluationCommandTests : IDisposable
             Assert.True(r.GetProperty("totalMs").GetInt64() >= 0);
             Assert.True(r.GetProperty("firstPartMs").GetInt64() >= 0);
             Assert.Equal(2, r.GetProperty("parts").GetInt32());
-            Assert.Matches("^v1\\+[0-9a-f]{8}$", r.GetProperty("promptVersion").GetString()!);
+            Assert.Matches("^v2\\+[0-9a-f]{8}$", r.GetProperty("promptVersion").GetString()!);
         });
         Assert.Equal(["s01", "s02", "s01", "s02"], rows.Select(r => r.GetProperty("scenarioId").GetString()!).ToArray());
 

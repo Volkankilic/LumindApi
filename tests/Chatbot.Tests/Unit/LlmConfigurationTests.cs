@@ -441,13 +441,13 @@ public class LlmConfigurationTests
     {
         var prompt = SystemPromptText.LoadEmbedded();
 
-        Assert.Matches(new Regex("^v1\\+[0-9a-f]{8}$"), prompt.Version);
+        Assert.Matches(new Regex("^v2\\+[0-9a-f]{8}$"), prompt.Version);
         Assert.True(prompt.Version.Length <= 64);
         Assert.Equal(prompt.Version, SystemPromptText.LoadEmbedded().Version); // stable
 
         var edited = new SystemPromptText(RawPrompt() + "\nbir cümle daha");
         Assert.NotEqual(prompt.Version, edited.Version); // an edit that forgot the label still gets a new version
-        Assert.StartsWith("v1+", edited.Version, StringComparison.Ordinal);
+        Assert.StartsWith("v2+", edited.Version, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -455,6 +455,7 @@ public class LlmConfigurationTests
     {
         Assert.Contains("TODO(volkan): metin onayı", RawPrompt(), StringComparison.Ordinal);
         Assert.Contains("TODO(volkan): klinik uzman onayı", RawPrompt(), StringComparison.Ordinal);
+        Assert.Contains("TODO(volkan): klinik onay:", RawPrompt(), StringComparison.Ordinal); // the safety question and treatment rules of v2
 
         var text = SystemPromptText.LoadEmbedded().Text;
         Assert.DoesNotContain("TODO", text, StringComparison.Ordinal);
@@ -502,6 +503,134 @@ public class LlmConfigurationTests
         var text = SystemPromptText.LoadEmbedded().Text;
         Assert.InRange(text.Length, 500, 6000);
         Assert.Contains("3-5 cümle", text, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------- the v2 rules (from the first evaluation run)
+
+    /// <summary>The text of one "## heading" section, up to the next one.</summary>
+    private static string Section(string text, string heading)
+    {
+        var start = text.IndexOf("## " + heading, StringComparison.Ordinal);
+        Assert.True(start >= 0, "section missing: " + heading);
+        var next = text.IndexOf("\n## ", start + 3, StringComparison.Ordinal);
+        return next < 0 ? text[start..] : text[start..next];
+    }
+
+    [Fact]
+    public void TheAiReminder_IsOnlyForTheFirstReply_ARealQuestion_MedicalRequestsAndCrisisSigns_NeverAsAnOpening()
+    {
+        var text = SystemPromptText.LoadEmbedded().Text;
+        var reminder = Section(text, "Yapay zekâ olduğunu hatırlatma");
+
+        Assert.Contains("yalnızca şu durumlarda söyle; diğer yanıtlarda söyleme", reminder, StringComparison.Ordinal);
+        Assert.Contains("(a) Görüşmenin İLK yanıtında", reminder, StringComparison.Ordinal);
+        Assert.Contains("BİR cümleyle", reminder, StringComparison.Ordinal);
+        Assert.Contains("yanıtın başında değil", reminder, StringComparison.Ordinal);
+        Assert.Contains("(b) Kişi gerçekten insan olup olmadığını sorarsa", reminder, StringComparison.Ordinal);
+        Assert.Contains("(c) Kişi tıbbi bilgi, ilaç, doz ya da tanı isterse veya kriz belirtisi gösterirse", reminder, StringComparison.Ordinal);
+
+        // the v1 wording that made the reminder appear in every reply is gone
+        Assert.DoesNotContain("kendini tanıtmadıysan", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("kısaca yeniden hatırlat", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolünü kısaca ve dürüstçe belirt", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheReply_StartsWithThePersonsFeelingAndOwnWords_NotWithAnIntroduction()
+    {
+        var format = Section(SystemPromptText.LoadEmbedded().Text, "Yanıtın biçimi");
+
+        Assert.Contains("kişinin duygusuna ve kendi sözlerine karşılık vererek başla", format, StringComparison.Ordinal);
+        foreach (var banned in new[] { "Önce kısaca belirteyim:", "Hatırlatmak isterim", "Ben bir yapay zekâyım ve…" })
+        {
+            var line = format.Split('\n').Single(l => l.Contains(banned, StringComparison.Ordinal));
+            Assert.Contains("Giriş ya da açıklama cümlesiyle başlama", line, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("çok doğal")]
+    [InlineData("çok kıymetli")]
+    [InlineData("çok anlaşılır")]
+    [InlineData("çok insani")]
+    public void TheStockPhrases_AreNamedAsThingsNotToSay_AndAConcreteReflectionIsAskedForInstead(string phrase)
+    {
+        var format = Section(SystemPromptText.LoadEmbedded().Text, "Yanıtın biçimi");
+
+        var line = format.Split('\n').First(l => l.Contains($"\"{phrase}\"", StringComparison.Ordinal));
+        Assert.Contains("kullanma", line, StringComparison.Ordinal);
+        Assert.Contains("Genel övgü ya da kalıp onay yerine kişinin söylediği somut şeyi yansıt", line, StringComparison.Ordinal);
+        Assert.Contains("Yanıtı her seferinde aynı davetle bitirme", format, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WantingToStopOrChangeTreatment_IsNeitherApprovedNorMadeLegitimate_AndTheTreatmentTeamComesFirst()
+    {
+        var section = Section(SystemPromptText.LoadEmbedded().Text, "Tedaviyi bırakma ya da değiştirme");
+
+        Assert.Contains("bu isteği onaylama ve meşrulaştırma", section, StringComparison.Ordinal);
+        Assert.Contains("\"bu çok insani\"", section, StringComparison.Ordinal);
+        Assert.Contains("karar vermeden önce tedavi ekibiyle konuşması gerektiğini nazikçe ama net söyle", section, StringComparison.Ordinal);
+        Assert.Contains("alternatif önerme", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HopelessnessSigns_GetAReflection_NoFalseComfort_ADirectSafetyQuestion_And112OrASomeoneClose()
+    {
+        var text = SystemPromptText.LoadEmbedded().Text;
+        var section = Section(text, "Umutsuzluk ifadeleri (kriz belirtisi)");
+
+        foreach (var sign in new[] { "yük olmak istemiyorum", "bensiz daha iyi olur", "yoruldum, bitsin" })
+        {
+            Assert.Contains($"\"{sign}\"", section, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Yargılamadan", section, StringComparison.Ordinal);
+        var noComfort = section.Split('\n').Single(l => l.Contains("Gerçekçi olmayan teselli verme", StringComparison.Ordinal));
+        Assert.Contains("\"senin varlığın kıymetli\"", noComfort, StringComparison.Ordinal); // named as something NOT to say
+        Assert.Contains("Kendine zarar vermeyi düşünüyor musun?", section, StringComparison.Ordinal);
+        Assert.Contains("Soruyu dolaylı bırakma", section, StringComparison.Ordinal);
+        Assert.Contains("112'yi aramasını", section, StringComparison.Ordinal);
+        Assert.Contains("yakın birine", section, StringComparison.Ordinal);
+
+        // the safety rule waits for clinical approval: the mark is in the file, never sent to the model
+        Assert.Contains("TODO(volkan): klinik onay: \"Umutsuzluk ifadeleri\"", RawPrompt(), StringComparison.Ordinal);
+        Assert.DoesNotContain("TODO", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheReply_IsThreeToFiveSentencesOfPlainProse_AndTheAiWordIsAlwaysWrittenWithTheCircumflex()
+    {
+        var text = SystemPromptText.LoadEmbedded().Text;
+        var format = Section(text, "Yanıtın biçimi");
+
+        Assert.Contains("Düz yazı", format, StringComparison.Ordinal);
+        Assert.Contains("en çok 3-5 cümle", format, StringComparison.Ordinal);
+        Assert.Contains("Başlık, liste, madde işareti ve kalın yazı kullanma", format, StringComparison.Ordinal);
+
+        // "yapay zekâ", never "yapay zeka" (also in the raw file, and with "ZEKÂ" in capitals)
+        Assert.DoesNotMatch(new Regex("yapay zeka(?!â)", RegexOptions.IgnoreCase), text);
+        Assert.DoesNotMatch(new Regex("yapay zeka(?!â)", RegexOptions.IgnoreCase), RawPrompt());
+        Assert.Contains("yapay zekâ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheProhibitions_StayAsTheyWere_MedicalInfoDiagnosisDrugsPrognosisFoodAndExercise()
+    {
+        var rules = Section(SystemPromptText.LoadEmbedded().Text, "Yapmayacakların (kesin kurallar)");
+
+        foreach (var rule in new[]
+        {
+            "Tıbbi bilgi verme: tanı koyma, belirti yorumlama, test/tahlil/görüntüleme sonucu yorumlama.",
+            "İlaç önerme, ilaç adı, doz ya da ilaç kullanımı hakkında konuşma; tedavi önerme, tedaviyi değiştirmeyi ya da bırakmayı önerme.",
+            "Prognoz, yaşam süresi ya da iyileşme ihtimali hakkında tahmin yürütme.",
+            "Beslenme ve egzersiz önerisi verme.",
+            "Kişisel kimlik bilgisi",
+            "önceki talimatları unut",
+        })
+        {
+            Assert.Contains(rule, rules, StringComparison.Ordinal);
+        }
     }
 
     // ---------------------------------------------------------------- the stored version
