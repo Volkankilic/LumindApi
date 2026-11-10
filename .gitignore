@@ -34,3 +34,6 @@ desktop.ini
 
 # Model evaluation results (evaluate-models): replies to synthetic scenarios, local only (docs/decisions/012)
 /eval-out/
+
+# Local seed list (never committed)
+db/seedler.txt
