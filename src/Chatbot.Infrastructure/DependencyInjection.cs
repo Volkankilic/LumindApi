@@ -107,6 +107,7 @@ public static class DependencyInjection
         {
             var development = sp.GetRequiredService<IHostEnvironment>().IsDevelopment();
             var llm = sp.GetRequiredService<LlmOptions>();
+            // Llm:ActiveProfile (empty: the flat Llm:* settings) is resolved inside the responder, which refuses a bad profile by setting name.
             IChatResponder responder = llm.IsReal
                 ? new OpenAiCompatibleChatResponder(
                     LlmHttpClient.Create(),

@@ -106,6 +106,28 @@ Ayarı PowerShell'de girerken dikkat: Windows PowerShell 5.1 yerel komutlara ge�
 
 `Llm:BaseUrl` ana makinesi `Llm:AllowedHosts` listesinde değilse (ya da https değilse) API **başlamaz**; ileti yalnızca ayar adını söyler. İsteğe bağlı ayarlar ve varsayılanları: `Temperature` 0,6, `MaxTokens` 400 (`MaxTokensParameter`: alan adı, varsayılan `max_tokens`), `FirstTokenTimeoutSeconds` 25, `IdleTimeoutSeconds` 20, `TotalTimeoutSeconds` 120, `MaxRetries` 2, `RetryBaseDelayMs` 500, `MaxConcurrentRequests` 8. Railway'de ad biçimi `Llm__ApiKey`, `Llm__AllowedHosts__0` vb. Ayrıntı: [ADR 012](../docs/decisions/012-model-saglayici-baglantisi.md).
 
+### Model profilleri (`Llm:Profiles`, `Llm:ActiveProfile`)
+
+Birden çok model sunucusu arasında geçiş, yalnızca ayarla yapılır. **Düz `Llm:*` ayarları örtük "varsayılan" profildir ve olduğu gibi çalışmaya devam eder** (bugünkü EVREN canlı kurulumu hiçbir değişiklik gerektirmez; testle kanıtlıdır: aynı gövde, aynı başlıklar). `Llm:ActiveProfile` boşsa düz ayarlar kullanılır; doluysa `Llm:Profiles:<ad>:*` altındaki profil kullanılır. Profil adı: küçük harf, rakam ve tire (en çok 40 karakter).
+
+Bir profil şunları taşıyabilir: `BaseUrl`, `AllowedHosts`, `AuthScheme`, `AuthHeaderName`, `ApiKey`, `Model`, `ExtraBodyJson`, `MaxTokens`, `MaxTokensParameter`, `FirstTokenTimeoutSeconds`, `IdleTimeoutSeconds`, `TotalTimeoutSeconds`, `MaxRetries`.
+
+- **Uç nokta, anahtar, model ve ek alan profile aittir; düz ayarlardan HİÇBİRİ miras alınmaz** (düz `Llm:ApiKey` başka bir ana makineye asla gitmesin diye). Yalnızca sınırlar (`MaxTokens`, `MaxTokensParameter`, üç zaman aşımı, `MaxRetries`) profilde yoksa düz ayarlardan gelir. `Provider`, `Temperature`, `RetryBaseDelayMs` ve `MaxConcurrentRequests` hep düz ayarlardandır.
+- **`AuthScheme=None`:** kimlik doğrulama başlığı **hiç** gönderilmez (ne `Authorization` ne `X-API-Key`). Yalnızca **https** ve `AllowedHosts` içindeki ana makineyle çalışır (Development'taki localhost http istisnası burada geçerli değildir); yönlendirme izlenmez; `ApiKey` boş olmalıdır (anahtar bırakılırsa korumanın var sanılmaması için API açılmaz). Böyle bir profil aktifken başlangıçta içeriksiz bir **uyarı** günlüğe yazılır.
+- **`Model` isteğe bağlıdır (yalnızca profilde):** boşsa istek gövdesine `model` alanı **hiç eklenmez**, sunucu kendi (tek) modelini kullanır. Ekranda ve sonuç dosyalarında etiket `(sunucu varsayılanı)` olur. Düz ayarlarda `Llm:Model` zorunlu kalır.
+- **Doğrulama:** aktif profil (ve geçerli ad) başlangıçta denetlenir; ileti **ayar adını** söyler (`Llm:Profiles:lumindtr:BaseUrl is missing…`), değeri söylemez. Aktif olmayan profiller denetlenmez (yarım yazılmış profil beklemede kalabilir); ama geçersiz bir profil **adı** her zaman reddedilir. `Llm:Provider=Fake` iken `Llm:ActiveProfile` yanlışsa da API açılmaz (yazım hatası, sağlayıcı açıldığı güne kalmasın).
+- **Reasoning:** `delta.reasoning` (EVREN) ve `delta.reasoning_content` (llama.cpp) aynı işlenir: yalnızca karakter sayısı sayılır, kullanıcıya gönderilmez, saklanmaz, loglanmaz.
+- Railway'de geçiş: `Llm__ActiveProfile` ve `Llm__Profiles__<ad>__...` ([docs/yayin-railway.md](../docs/yayin-railway.md)). Örnek (kimlik doğrulamasız, modelsiz ikinci sunucu):
+
+```text
+Llm__ActiveProfile=lumindtr
+Llm__Profiles__lumindtr__BaseUrl=https://lumindtr.com/llm/v1
+Llm__Profiles__lumindtr__AllowedHosts__0=lumindtr.com
+Llm__Profiles__lumindtr__AuthScheme=None
+```
+
+> **Güvenlik notu:** kimlik doğrulamasız bir uç nokta, adresi bilen herkesin kullanımına açıktır. Pilottan önce erişim kısıtı (anahtar ya da IP izni) gerekir: [pilot öncesi kontrol listesi](../docs/pilot-oncesi-kontrol-listesi.md).
+
 ### Model değerlendirme komutu (yerel, sentetik veri)
 
 ```powershell
@@ -120,6 +142,7 @@ Senaryo dosyasındaki her senaryoyu listedeki her modele, sohbettekiyle aynı pa
 - **Kriz algılanan senaryo modele gönderilmez** (`crisis-intercepted` olarak kaydedilir; sohbetteki gibi).
 - **Çıktı:** `api/eval-out/<zaman>/results.jsonl` (senaryo, model, ilk parça ms, toplam ms, durum, deneme, yanıt, istem sürümü) ve `summary.md` (model başına medyan/p95). Klasör git'e girmez; `--out` yalnızca `api/eval-out/` altında ya da depo dışında olabilir. İçeriği sohbete, e-postaya ya da repoya koymayın.
 - `--prompt <dosya>`: gömülü istem yerine bir istem varyantı dener (sürüm etiketi ve özeti sonuçta kayıtlıdır).
+- `--profile <ad>`: `Llm:Profiles:<ad>` profilini kullanır. **Verilmezse düz (varsayılan) ayarlar** kullanılır; `Llm:ActiveProfile` bu komutta okunmaz. Onaydan önce ekrana **profil adı, hedef sunucu, kimlik doğrulama biçimi** (`None` dahil: "Kimlik doğrulama: YOK (None)…"; anahtar değeri hiç yazılmaz), **model etiketi** ve ek alan adları yazılır ve `evet` istenir. `--models` verilmezse ve profilde `Model` boşsa **tek bir "sunucu varsayılanı" çalışması** yapılır (gövdede `model` yok); profilde model varsa o kullanılır. `--models` verilirse o modeller gönderilir. `--extra-body` profille birlikte de geçerlidir. Sonuç satırlarına `profile` ve (sunucu yanıtında `model` alanı varsa, yalnızca bilgi olarak) `serverModel` eklenir; `summary.md` profili ve sunucunun bildirdiği modeli gösterir.
 - `--extra-body <dosya.json>`: dosyadaki JSON nesnesi `Llm:ExtraBodyJson` ayarının **yerine** kullanılır (aynı doğrulamalar: nesne, en çok 2 KB, ayrılmış alan yok). Dosya yalnızca okunur, içeriği konsola yazılmaz; konsol yalnızca **üst düzey anahtar adlarını** gösterir (`Ek istek alanları (yalnızca adlar): …`). Boş dosya "hiç ek alan yok" demektir (ayardaki değer de devre dışı kalır). Her model için ayrı bir dosyayla ayrı çalıştırma yapılabilir; örneğin:
 
   ```powershell

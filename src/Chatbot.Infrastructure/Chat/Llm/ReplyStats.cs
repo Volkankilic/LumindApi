@@ -12,8 +12,12 @@ public sealed class ReplyStats
     /// <summary>Characters of "reasoning" / "reasoning_content" the server streamed. The content itself is NOT stored.</summary>
     public long ReasoningChars { get; internal set; }
 
+    /// <summary>The <c>model</c> field of the reply, when the server sent one that looks like a model name. Information for the report only.</summary>
+    public string? ServerModel { get; internal set; }
+
     internal void Reset()
     {
+        ServerModel = null;
         CompletionTokens = null;
         ReasoningChars = 0;
     }

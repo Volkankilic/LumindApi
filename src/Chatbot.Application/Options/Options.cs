@@ -238,7 +238,36 @@ public sealed class LlmOptions
 
     public const string ApiKeyHeaderAuth = "ApiKeyHeader";
 
+    /// <summary>No authentication header at all (an endpoint that is open by design). Allowed only over https to a host on the allow list.</summary>
+    public const string NoneAuth = "None";
+
     public bool UsesApiKeyHeader => string.Equals(AuthScheme, ApiKeyHeaderAuth, StringComparison.OrdinalIgnoreCase);
+
+    public bool UsesNoAuth => string.Equals(AuthScheme, NoneAuth, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The profile that is used: empty (default) means the flat <c>Llm:*</c> settings above, which stay the implicit "default" profile.
+    /// Otherwise the name of an entry under <see cref="Profiles"/> (lowercase letters, digits, hyphens). Switching on Railway is
+    /// <c>Llm__ActiveProfile</c> plus the <c>Llm__Profiles__&lt;name&gt;__...</c> variables.
+    /// </summary>
+    public string? ActiveProfile { get; set; }
+
+    /// <summary>Named endpoint settings. A profile never inherits the endpoint, key, model or extra body of the flat settings.</summary>
+    public Dictionary<string, LlmProfileOptions> Profiles { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Set by <see cref="LlmProfiles.Resolve"/> only (the configuration binder cannot set it): the profile these effective settings come from, empty for the flat ones.</summary>
+    public string ProfileName { get; internal set; } = string.Empty;
+
+    /// <summary>Set by <see cref="LlmProfiles.Resolve"/> only: a profile may leave <see cref="Model"/> empty (the server's own default model is used).</summary>
+    public bool ModelOptional { get; internal set; }
+
+    /// <summary>The prefix of the setting names in messages: <c>Llm:</c> or <c>Llm:Profiles:&lt;name&gt;:</c>.</summary>
+    public string SettingPrefix => ProfileName.Length == 0 ? "Llm:" : $"Llm:Profiles:{ProfileName}:";
+
+    public const string ServerDefaultModelLabel = "(sunucu varsayılanı)";
+
+    /// <summary>The model name for screens and result files, or "(sunucu varsayılanı)" when no model is sent.</summary>
+    public string ModelLabel => string.IsNullOrWhiteSpace(Model) ? ServerDefaultModelLabel : Model;
 
     /// <summary>Host names (no scheme, no wildcard) the base URL may point to. The application does not start when the base URL's host is not listed.</summary>
     public string[] AllowedHosts { get; set; } = [];
@@ -277,12 +306,14 @@ public sealed class LlmOptions
 
     public bool IsReal => string.Equals(Provider, OpenAiCompatibleProvider, StringComparison.OrdinalIgnoreCase);
 
-    public LlmOptions WithModel(string model)
+    public LlmOptions WithModel(string? model)
     {
         var copy = (LlmOptions)MemberwiseClone();
         copy.Model = model;
         return copy;
     }
+
+    internal LlmOptions Copy() => (LlmOptions)MemberwiseClone();
 
     public LlmOptions WithExtraBodyJson(string? json)
     {
@@ -290,6 +321,43 @@ public sealed class LlmOptions
         copy.ExtraBodyJson = json;
         return copy;
     }
+}
+
+/// <summary>
+/// One named model endpoint (<c>Llm:Profiles:&lt;name&gt;:*</c>). The endpoint, key, model and extra body are the profile's own: nothing is
+/// taken from the flat settings, so a key can never travel to another host. The limits (token cap, timeouts, retries) fall back to the
+/// flat settings when the profile leaves them out.
+/// </summary>
+public sealed class LlmProfileOptions
+{
+    public string? BaseUrl { get; set; }
+
+    public string[] AllowedHosts { get; set; } = [];
+
+    /// <summary><c>Bearer</c> (default), <c>ApiKeyHeader</c> or <c>None</c>.</summary>
+    public string? AuthScheme { get; set; }
+
+    public string? AuthHeaderName { get; set; }
+
+    /// <summary>Secret. Must be empty with <c>AuthScheme=None</c>.</summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>Optional. Empty: no <c>model</c> field is sent and the server uses its own (single) model.</summary>
+    public string? Model { get; set; }
+
+    public string? ExtraBodyJson { get; set; }
+
+    public int? MaxTokens { get; set; }
+
+    public string? MaxTokensParameter { get; set; }
+
+    public double? FirstTokenTimeoutSeconds { get; set; }
+
+    public double? IdleTimeoutSeconds { get; set; }
+
+    public double? TotalTimeoutSeconds { get; set; }
+
+    public int? MaxRetries { get; set; }
 }
 
 public sealed class DatabaseOptions

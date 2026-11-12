@@ -100,56 +100,86 @@ public static class OptionsValidator
     }
 
     /// <summary>
-    /// The model settings. With the default provider (<c>Fake</c>) nothing else is checked: no key, no URL, nothing leaves the server.
-    /// Messages name the SETTING only, never its value.
+    /// The model settings. With the default provider (<c>Fake</c>) no endpoint is checked: no key, no URL, nothing leaves the server.
+    /// The profile choice (<c>Llm:ActiveProfile</c>, the names under <c>Llm:Profiles</c>) is checked whatever the provider says, so a
+    /// typo does not wait for the day the provider is switched on. Messages name the SETTING only, never its value.
     /// </summary>
     public static IReadOnlyList<string> ValidateLlm(LlmOptions llm, bool development)
     {
-        if (llm.IsReal)
+        var problems = new List<string>();
+        if (llm.Profiles is not null && llm.Profiles.Keys.Any(k => !LlmProfiles.IsValidName(k)))
         {
-            return ValidateEndpoint(llm, development);
+            problems.Add("Llm:Profiles has a profile name that is not made of lowercase letters, digits and hyphens (at most 40 characters).");
         }
 
-        return string.Equals(llm.Provider, LlmOptions.FakeProvider, StringComparison.OrdinalIgnoreCase)
-            ? []
-            : ["Llm:Provider must be Fake or OpenAiCompatible."];
+        var resolution = LlmProfiles.Resolve(llm, llm.ActiveProfile);
+        problems.AddRange(resolution.Problems);
+
+        if (llm.IsReal)
+        {
+            if (resolution.Problems.Count == 0)
+            {
+                problems.AddRange(ValidateEndpoint(resolution.Effective, development));
+            }
+        }
+        else if (!string.Equals(llm.Provider, LlmOptions.FakeProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add("Llm:Provider must be Fake or OpenAiCompatible.");
+        }
+
+        return problems;
     }
 
-    /// <summary>Everything a real model call needs. The evaluation command uses it too, whatever <c>Llm:Provider</c> says.</summary>
+    /// <summary>
+    /// Everything a real model call needs, for EFFECTIVE settings (see <see cref="LlmProfiles.Resolve"/>); the messages carry the
+    /// <see cref="LlmOptions.SettingPrefix"/> of the profile. The evaluation command uses it too, whatever <c>Llm:Provider</c> says.
+    /// </summary>
     public static IReadOnlyList<string> ValidateEndpoint(LlmOptions llm, bool development)
     {
         var problems = new List<string>();
+        var p = llm.SettingPrefix;
+        var noAuth = llm.UsesNoAuth;
 
-        problems.AddRange(LlmEndpointPolicy.Check(llm.BaseUrl, llm.AllowedHosts, development));
+        problems.AddRange(LlmEndpointPolicy.Check(llm.BaseUrl, llm.AllowedHosts, development, p, httpsOnly: noAuth));
 
-        if (string.IsNullOrWhiteSpace(llm.ApiKey))
+        if (noAuth)
         {
-            problems.Add("Llm:ApiKey is missing (set it with user-secrets or the Llm__ApiKey environment variable).");
+            // No header is sent, so a key here would only suggest a protection that does not exist.
+            if (!string.IsNullOrWhiteSpace(llm.ApiKey))
+            {
+                problems.Add($"{p}ApiKey must be empty when {p}AuthScheme is None.");
+            }
         }
-
+        else if (string.IsNullOrWhiteSpace(llm.ApiKey))
+        {
+            problems.Add($"{p}ApiKey is missing (set it with user-secrets or the {p.Replace(":", "__", StringComparison.Ordinal)}ApiKey environment variable).");
+        }
         else if (llm.ApiKey.Any(char.IsControl) || llm.ApiKey != llm.ApiKey.Trim())
         {
             // A line break would let the key value start a second header; a stray space is a copy mistake.
-            problems.Add("Llm:ApiKey must not contain line breaks, control characters or leading/trailing spaces.");
+            problems.Add($"{p}ApiKey must not contain line breaks, control characters or leading/trailing spaces.");
         }
 
-        if (!llm.UsesApiKeyHeader && !string.Equals(llm.AuthScheme, LlmOptions.BearerAuth, StringComparison.OrdinalIgnoreCase))
+        if (!llm.UsesApiKeyHeader && !noAuth && !string.Equals(llm.AuthScheme, LlmOptions.BearerAuth, StringComparison.OrdinalIgnoreCase))
         {
-            problems.Add("Llm:AuthScheme must be Bearer or ApiKeyHeader.");
+            problems.Add($"{p}AuthScheme must be Bearer, ApiKeyHeader or None.");
         }
 
         if (!LlmEndpointPolicy.IsValidHeaderName(llm.AuthHeaderName))
         {
-            problems.Add("Llm:AuthHeaderName must be a plain HTTP header name (letters, digits and - _ . only; not Authorization, Content-Type, Host or similar).");
+            problems.Add($"{p}AuthHeaderName must be a plain HTTP header name (letters, digits and - _ . only; not Authorization, Content-Type, Host or similar).");
         }
 
         if (string.IsNullOrWhiteSpace(llm.Model))
         {
-            problems.Add("Llm:Model is missing.");
+            if (!llm.ModelOptional)
+            {
+                problems.Add($"{p}Model is missing.");
+            }
         }
         else if (!LlmEndpointPolicy.IsValidModelName(llm.Model))
         {
-            problems.Add("Llm:Model has characters a model name does not use.");
+            problems.Add($"{p}Model has characters a model name does not use.");
         }
 
         if (llm.Temperature is < 0 or > 2)
@@ -159,25 +189,25 @@ public static class OptionsValidator
 
         if (llm.MaxTokens is < 1 or > 8192)
         {
-            problems.Add("Llm:MaxTokens must be between 1 and 8192.");
+            problems.Add($"{p}MaxTokens must be between 1 and 8192.");
         }
 
         if (string.IsNullOrWhiteSpace(llm.MaxTokensParameter) || llm.MaxTokensParameter.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_')))
         {
-            problems.Add("Llm:MaxTokensParameter must be a plain field name.");
+            problems.Add($"{p}MaxTokensParameter must be a plain field name.");
         }
 
         if (llm.FirstTokenTimeoutSeconds <= 0 || llm.IdleTimeoutSeconds <= 0 || llm.TotalTimeoutSeconds <= 0)
         {
-            problems.Add("Llm:FirstTokenTimeoutSeconds, Llm:IdleTimeoutSeconds and Llm:TotalTimeoutSeconds must be positive.");
+            problems.Add($"{p}FirstTokenTimeoutSeconds, {p}IdleTimeoutSeconds and {p}TotalTimeoutSeconds must be positive.");
         }
 
         if (llm.MaxRetries is < 0 or > 5 || llm.RetryBaseDelayMs is < 0 or > 10_000)
         {
-            problems.Add("Llm:MaxRetries must be 0-5 and Llm:RetryBaseDelayMs 0-10000.");
+            problems.Add($"{p}MaxRetries must be 0-5 and Llm:RetryBaseDelayMs 0-10000.");
         }
 
-        problems.AddRange(LlmExtraBody.Check(llm.ExtraBodyJson, llm.MaxTokensParameter, "Llm:ExtraBodyJson"));
+        problems.AddRange(LlmExtraBody.Check(llm.ExtraBodyJson, llm.MaxTokensParameter, $"{p}ExtraBodyJson"));
 
         if (llm.MaxConcurrentRequests is < 1 or > 100)
         {

@@ -17,7 +17,8 @@ public sealed class ConfigurationValidationService(
     AdminAuthOptions adminOptions,
     LlmOptions llm,
     ICrisisDetector crisisDetector,
-    IHostEnvironment environment) : IHostedService
+    IHostEnvironment environment,
+    ILogger<ConfigurationValidationService> logger) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -45,6 +46,18 @@ public sealed class ConfigurationValidationService(
         if (problems.Count > 0)
         {
             throw new InvalidOperationException("Invalid configuration: " + string.Join(" ", problems));
+        }
+
+        // A model endpoint without authentication is allowed, but never silently: one warning, no content, no address.
+        if (llm.IsReal)
+        {
+            var active = LlmProfiles.Resolve(llm, llm.ActiveProfile).Effective;
+            if (active.UsesNoAuth)
+            {
+                logger.LogWarning(
+                    "An authentication-free model profile is active (profile {Profile}, AuthScheme None): restrict access to that endpoint (key or IP allow list).",
+                    active.ProfileName);
+            }
         }
 
         return Task.CompletedTask;

@@ -57,7 +57,9 @@ public static class ModelEvaluationCommand
         long? ReasoningChars,
         string[] ExtraBodyKeys,
         string PromptVersion,
-        string? Reply);
+        string? Reply,
+        string Profile,
+        string? ServerModel);
 
     public static async Task<int> RunAsync(
         IHostEnvironment environment,
@@ -88,17 +90,59 @@ public static class ModelEvaluationCommand
             return 1;
         }
 
-        var models = (ValueOf(args, "--models")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? file.Models ?? [])
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        if (models.Count == 0 || models.Any(m => !LlmEndpointPolicy.IsValidModelName(m)))
+        // ---- the settings (a real call needs a base URL on the allow list and the key, whatever Llm:Provider says)
+        // --profile <name> selects a named profile; without it the flat Llm:* settings are used (Llm:ActiveProfile is NOT consulted here).
+        var raw = services.GetRequiredService<LlmOptions>();
+        var profileArg = ValueOf(args, "--profile");
+        if (args.Contains("--profile") && string.IsNullOrWhiteSpace(profileArg))
+        {
+            console.WriteLine("--profile için bir profil adı gerekli.");
+            return 1;
+        }
+
+        var resolution = LlmProfiles.Resolve(raw, profileArg, "--profile");
+        if (resolution.Problems.Count > 0)
+        {
+            console.WriteLine("Profil kullanılamıyor: " + string.Join(" ", resolution.Problems));
+            return 1;
+        }
+
+        var llm = resolution.Effective;
+        var onProfile = llm.ProfileName.Length > 0;
+
+        // The model list: --models, else (a profile WITHOUT a model) one run on the server's default model, else the file's list, else the profile's own model.
+        var cliModels = ValueOf(args, "--models")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        List<string?> models;
+        if (cliModels is { Length: > 0 })
+        {
+            models = [.. cliModels.Distinct(StringComparer.Ordinal)];
+        }
+        else if (onProfile && string.IsNullOrWhiteSpace(llm.Model))
+        {
+            models = [null];
+            if (file.Models is { Length: > 0 })
+            {
+                console.WriteLine("Not: profilde model yok; dosyadaki \"models\" listesi yok sayıldı, tek bir \"sunucu varsayılanı\" çalışması yapılacak (--models ile model verebilirsiniz).");
+            }
+        }
+        else if (file.Models is { Length: > 0 })
+        {
+            models = [.. file.Models.Distinct(StringComparer.Ordinal)];
+        }
+        else if (onProfile)
+        {
+            models = [llm.Model];
+        }
+        else
+        {
+            models = [];
+        }
+
+        if (models.Count == 0 || models.Any(m => m is not null && !LlmEndpointPolicy.IsValidModelName(m)))
         {
             console.WriteLine("En az bir geçerli model adı gerekli (--models a,b ya da dosyadaki \"models\" listesi).");
             return 1;
         }
-
-        // ---- the settings (a real call needs a base URL on the allow list and the key, whatever Llm:Provider says)
-        var llm = services.GetRequiredService<LlmOptions>();
 
         // --extra-body <file>: the object in that file REPLACES Llm:ExtraBodyJson (same checks). The path is only read; the text is never printed.
         var extraPath = ValueOf(args, "--extra-body");
@@ -162,17 +206,27 @@ public static class ModelEvaluationCommand
 
         // ---- the confirmation: the texts leave this machine
         var host = new Uri(llm.BaseUrl!.Trim()).Host;
+        var profileLabel = onProfile ? llm.ProfileName : LlmProfiles.DefaultLabel;
+        console.WriteLine($"Profil: {profileLabel}{(onProfile ? string.Empty : " (düz Llm:* ayarları)")}");
         console.WriteLine($"Hedef model sunucusu: {host}");
-        console.WriteLine(llm.UsesApiKeyHeader
-            ? $"Anahtar başlığı: {llm.AuthHeaderName} (Authorization gönderilmez)"
-            : "Anahtar başlığı: Authorization: Bearer");
-        var extraKeys = LlmExtraBody.Parse(llm.ExtraBodyJson, llm.MaxTokensParameter, "Llm:ExtraBodyJson").Fields.Keys.ToList();
+        if (llm.UsesNoAuth)
+        {
+            console.WriteLine("Kimlik doğrulama: YOK (None): hiçbir kimlik doğrulama başlığı gönderilmez");
+        }
+        else
+        {
+            console.WriteLine(llm.UsesApiKeyHeader
+                ? $"Anahtar başlığı: {llm.AuthHeaderName} (Authorization gönderilmez)"
+                : "Anahtar başlığı: Authorization: Bearer");
+        }
+
+        var extraKeys = LlmExtraBody.Parse(llm.ExtraBodyJson, llm.MaxTokensParameter, $"{llm.SettingPrefix}ExtraBodyJson").Fields.Keys.ToList();
         if (extraKeys.Count > 0)
         {
             console.WriteLine($"Ek istek alanları (yalnızca adlar): {string.Join(", ", extraKeys)}");
         }
 
-        console.WriteLine($"Modeller: {string.Join(", ", models)}");
+        console.WriteLine($"Modeller: {string.Join(", ", models.Select(m => llm.WithModel(m).ModelLabel))}");
         console.WriteLine($"Senaryo sayısı: {file.Scenarios!.Count}. Yalnızca SENTETİK içerik gönderilir; sonuçlar yerelde kalır.");
         var answer = console.ReadLine("Devam etmek için tam olarak 'evet' yazın: ");
         if (!string.Equals(answer?.Trim(), "evet", StringComparison.Ordinal))
@@ -191,12 +245,14 @@ public static class ModelEvaluationCommand
         using var http = LlmHttpClient.Create(handler);
         await using (var results = new StreamWriter(Path.Combine(outDir, "results.jsonl"), append: false, new UTF8Encoding(false)) { AutoFlush = true })
         {
-            foreach (var model in models)
+            foreach (var configured in models)
             {
-                var responder = new OpenAiCompatibleChatResponder(http, llm.WithModel(model), prompt, logger, development: true);
+                var forModel = llm.WithModel(configured);
+                var model = forModel.ModelLabel;
+                var responder = new OpenAiCompatibleChatResponder(http, forModel, prompt, logger, development: true);
                 foreach (var scenario in file.Scenarios!)
                 {
-                    var row = await RunScenarioAsync(scenario, model, responder, prompt, crisis, redactor, chat, ct);
+                    var row = await RunScenarioAsync(scenario, model, profileLabel, responder, prompt, crisis, redactor, chat, ct);
                     rows.Add(row);
                     await results.WriteLineAsync(JsonSerializer.Serialize(row, WriteOptions));
                     console.WriteLine($"  [{model}] {row.ScenarioId}: {row.Status}{(row.Reason is null ? string.Empty : " (" + row.Reason + ")")}, {row.TotalMs} ms");
@@ -204,7 +260,7 @@ public static class ModelEvaluationCommand
             }
         }
 
-        await File.WriteAllTextAsync(Path.Combine(outDir, "summary.md"), Summary(rows, prompt.Version, host), new UTF8Encoding(false), ct);
+        await File.WriteAllTextAsync(Path.Combine(outDir, "summary.md"), Summary(rows, prompt.Version, host, profileLabel), new UTF8Encoding(false), ct);
         console.WriteLine();
         console.WriteLine($"Sonuçlar yazıldı: {outDir}");
         return 0;
@@ -213,6 +269,7 @@ public static class ModelEvaluationCommand
     private static async Task<ResultRow> RunScenarioAsync(
         Scenario scenario,
         string model,
+        string profile,
         OpenAiCompatibleChatResponder responder,
         ISystemPromptProvider prompt,
         ICrisisDetector crisis,
@@ -226,7 +283,7 @@ public static class ModelEvaluationCommand
         // The pipeline looks at the incoming message first: a crisis never reaches a model (the reply would be the fixed crisis text).
         if (crisis.Assess(last).IsCrisis)
         {
-            return new ResultRow(scenario.Id!, scenario.Title, model, "crisis-intercepted", null, null, 0, 0, null, null, responder.ExtraBodyKeys.ToArray(), prompt.Version, null);
+            return new ResultRow(scenario.Id!, scenario.Title, model, "crisis-intercepted", null, null, 0, 0, null, null, responder.ExtraBodyKeys.ToArray(), prompt.Version, null, profile, null);
         }
 
         // The context is built exactly like the chat does: earlier crisis messages and the replies to them are left out, texts are masked.
@@ -266,16 +323,16 @@ public static class ModelEvaluationCommand
                 reply.Append(chunk);
             }
 
-            return new ResultRow(scenario.Id!, scenario.Title, model, "ok", null, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, reply.ToString().Trim());
+            return new ResultRow(scenario.Id!, scenario.Title, model, "ok", null, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, reply.ToString().Trim(), profile, stats.ServerModel);
         }
         catch (ModelUnavailableException ex)
         {
             return new ResultRow(
-                scenario.Id!, scenario.Title, model, "unavailable", ex.Failure + (ex.StatusCode is null ? string.Empty : " " + ex.StatusCode), first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, parts > 0 ? reply.ToString().Trim() : null);
+                scenario.Id!, scenario.Title, model, "unavailable", ex.Failure + (ex.StatusCode is null ? string.Empty : " " + ex.StatusCode), first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, parts > 0 ? reply.ToString().Trim() : null, profile, stats.ServerModel);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new ResultRow(scenario.Id!, scenario.Title, model, "error", ex.GetType().Name, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, null);
+            return new ResultRow(scenario.Id!, scenario.Title, model, "error", ex.GetType().Name, first, Elapsed(started), parts, stats.CompletionTokens, stats.ReasoningChars, keys, prompt.Version, null, profile, stats.ServerModel);
         }
     }
 
@@ -342,12 +399,19 @@ public static class ModelEvaluationCommand
         return (file, null);
     }
 
-    private static string Summary(List<ResultRow> rows, string promptVersion, string host)
+    private static string Summary(List<ResultRow> rows, string promptVersion, string host, string profile)
     {
         var text = new StringBuilder();
         text.AppendLine("# Model değerlendirme özeti");
         text.AppendLine();
         text.AppendLine($"- Sunucu: {host}");
+        text.AppendLine($"- Profil: {profile}");
+        var reported = rows.Select(r => r.ServerModel).Where(m => m is not null).Distinct(StringComparer.Ordinal).ToList();
+        if (reported.Count > 0)
+        {
+            text.AppendLine($"- Sunucunun yanıtta bildirdiği model (yalnızca bilgi): {string.Join(", ", reported)}");
+        }
+
         text.AppendLine($"- Sistem istemi sürümü: {promptVersion}");
         text.AppendLine("- Girdiler SENTETİK senaryolardır. Bu klasör yerelde kalır; repoya, sohbete ya da e-postaya konmaz.");
         text.AppendLine();

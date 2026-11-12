@@ -749,6 +749,167 @@ public class ModelEvaluationCommandTests : IDisposable
         Assert.StartsWith("deneme+", row.GetProperty("promptVersion").GetString(), StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------- --profile
+
+    private static void AddLumind(Dictionary<string, string?> s, bool withModel = false)
+    {
+        s["Llm:Profiles:lumindtr:BaseUrl"] = "https://lumindtr.com/llm/v1";
+        s["Llm:Profiles:lumindtr:AllowedHosts:0"] = "lumindtr.com";
+        s["Llm:Profiles:lumindtr:AuthScheme"] = "None";
+        if (withModel)
+        {
+            s["Llm:Profiles:lumindtr:Model"] = "gemma-4-26B-A4B";
+        }
+    }
+
+    private static FakeLlmHandler ServerModelHandler() => new((_, _) => Task.FromResult(FakeLlmHandler.Sse(
+        "data: " + JsonSerializer.Serialize(new { model = "gemma-4-26B-A4B", choices = new[] { new { delta = new { reasoning_content = "SECRET-THOUGHT" } } } }),
+        "data: " + JsonSerializer.Serialize(new { model = "gemma-4-26B-A4B", choices = new[] { new { delta = new { content = "Buradayım." } } } }),
+        "data: [DONE]")));
+
+    [Fact]
+    public async Task WithAnOpenProfileAndNoModels_OneServerDefaultRunIsDone_WithNoModelFieldAndNoAuthHeader()
+    {
+        var (services, env) = Build(tweak: s => AddLumind(s));
+        var handler = ServerModelHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--profile", "lumindtr", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.Equal(2, handler.Count); // two scenarios, one run (the server default)
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal("https://lumindtr.com/llm/v1/chat/completions", r.Uri!.ToString());
+            Assert.Equal(["Accept", "Content-Length", "Content-Type"], r.Headers.Keys.Order(StringComparer.Ordinal).ToArray());
+            Assert.False(JsonDocument.Parse(r.Body).RootElement.TryGetProperty("model", out _));
+        });
+
+        // the confirmation shows the profile, the host, the authentication kind and the model label (never a key)
+        var text = console.All;
+        Assert.Contains("Profil: lumindtr", text, StringComparison.Ordinal);
+        Assert.Contains("lumindtr.com", text, StringComparison.Ordinal);
+        Assert.Contains("Kimlik doğrulama: YOK (None)", text, StringComparison.Ordinal);
+        Assert.Contains("Modeller: (sunucu varsayılanı)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, text, StringComparison.Ordinal);
+
+        // the result rows carry the label, the profile and the model the server reported; the reasoning is only counted
+        var rows = ResultLines(OutsideRepo).Select(l => JsonDocument.Parse(l).RootElement).ToList();
+        Assert.All(rows, row =>
+        {
+            Assert.Equal("(sunucu varsayılanı)", row.GetProperty("model").GetString());
+            Assert.Equal("lumindtr", row.GetProperty("profile").GetString());
+            Assert.Equal("gemma-4-26B-A4B", row.GetProperty("serverModel").GetString());
+            Assert.Equal("ok", row.GetProperty("status").GetString());
+            Assert.Equal("SECRET-THOUGHT".Length, row.GetProperty("reasoningChars").GetInt64());
+            Assert.Equal("Buradayım.", row.GetProperty("reply").GetString());
+        });
+        var files = File.ReadAllText(Path.Combine(OutsideRepo, "results.jsonl")) + File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.DoesNotContain("SECRET-THOUGHT", files, StringComparison.Ordinal);
+        var summary = File.ReadAllText(Path.Combine(OutsideRepo, "summary.md"));
+        Assert.Contains("- Profil: lumindtr", summary, StringComparison.Ordinal);
+        Assert.Contains("| (sunucu varsayılanı) |", summary, StringComparison.Ordinal);
+        Assert.Contains("gemma-4-26B-A4B", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithAnOpenProfile_TheModelsOption_StillSendsThatModel()
+    {
+        var (services, env) = Build(tweak: s => AddLumind(s));
+        var handler = OkHandler();
+
+        var code = await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--profile", "lumindtr", "--models", "gemma-x", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.All(handler.Requests, r => Assert.Equal("gemma-x", JsonDocument.Parse(r.Body).RootElement.GetProperty("model").GetString()));
+        Assert.Equal("gemma-x", JsonDocument.Parse(ResultLines(OutsideRepo)[0]).RootElement.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task AProfileWithAModel_UsesIt_WhenNoModelsAreGiven()
+    {
+        var (services, env) = Build(tweak: s => AddLumind(s, withModel: true));
+        var handler = OkHandler();
+
+        var code = await Run(services, env, new ScriptedConsole("evet"), handler, "--scenarios", StandardFile(), "--profile", "lumindtr", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.All(handler.Requests, r => Assert.Equal("gemma-4-26B-A4B", JsonDocument.Parse(r.Body).RootElement.GetProperty("model").GetString()));
+    }
+
+    [Fact]
+    public async Task WithoutTheProfileOption_TheFlatSettingsAreUsed_EvenIfActiveProfileIsSet()
+    {
+        var (services, env) = Build(tweak: s =>
+        {
+            AddLumind(s);
+            s["Llm:ActiveProfile"] = "lumindtr";
+        });
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--models", "m1", "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal("llm.example.test", r.Uri!.Host);
+            Assert.Equal("Bearer " + Key, r.Authorization);
+        });
+        Assert.Contains("Profil: varsayılan", console.All, StringComparison.Ordinal);
+        Assert.Equal("varsayılan", JsonDocument.Parse(ResultLines(OutsideRepo)[0]).RootElement.GetProperty("profile").GetString());
+    }
+
+    [Theory]
+    [InlineData("yok")]
+    [InlineData("Lumind")]
+    public async Task AnUnknownOrBadProfile_StopsTheCommand_BeforeAnythingIsAsked(string profile)
+    {
+        var (services, env) = Build(tweak: s => AddLumind(s));
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--profile", profile, "--models", "m1", "--out", OutsideRepo);
+
+        Assert.Equal(1, code);
+        Assert.Equal(0, handler.Count);
+        Assert.Contains("--profile", console.All, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(OutsideRepo));
+    }
+
+    [Fact]
+    public async Task AProfileOutsideItsAllowList_StopsTheCommand_AndNothingIsSent()
+    {
+        var (services, env) = Build(tweak: s =>
+        {
+            AddLumind(s);
+            s["Llm:Profiles:lumindtr:AllowedHosts:0"] = "someone-else.example";
+        });
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--profile", "lumindtr", "--out", OutsideRepo);
+
+        Assert.Equal(1, code);
+        Assert.Equal(0, handler.Count);
+        Assert.Contains("Llm:Profiles:lumindtr:BaseUrl", console.All, StringComparison.Ordinal);
+        Assert.DoesNotContain("lumindtr.com", console.All, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnExtraBodyFile_StillApplies_OnAProfile()
+    {
+        var (services, env) = Build(tweak: s => AddLumind(s));
+        var handler = OkHandler();
+        var console = new ScriptedConsole("evet");
+
+        var code = await Run(services, env, console, handler, "--scenarios", StandardFile(), "--profile", "lumindtr", "--extra-body", WriteExtra("""{"chat_template_kwargs":{"enable_thinking":false}}"""), "--out", OutsideRepo);
+
+        Assert.Equal(0, code);
+        Assert.Contains("Ek istek alanları (yalnızca adlar): chat_template_kwargs", console.All, StringComparison.Ordinal);
+        Assert.All(handler.Requests, r => Assert.True(JsonDocument.Parse(r.Body).RootElement.TryGetProperty("chat_template_kwargs", out _)));
+    }
+
     [Fact]
     public void TheCommand_IsRoutedByName_AndTheNameIsNotAnAdminCommand()
     {

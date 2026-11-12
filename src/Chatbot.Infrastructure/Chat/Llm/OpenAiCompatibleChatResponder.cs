@@ -40,21 +40,30 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
         ILogger<OpenAiCompatibleChatResponder> logger,
         bool development)
     {
-        var problems = OptionsValidator.ValidateEndpoint(options, development);
+        // Raw settings that name an active profile are resolved here too (an already resolved set passes through unchanged).
+        var resolution = LlmProfiles.Resolve(options, options.ActiveProfile);
+        var problems = resolution.Problems.Count > 0 ? resolution.Problems : OptionsValidator.ValidateEndpoint(resolution.Effective, development);
         if (problems.Count > 0)
         {
             // The messages name settings only, never values.
             throw new InvalidOperationException("Invalid Llm configuration: " + string.Join(" ", problems));
         }
 
+        options = resolution.Effective;
         _http = http;
         _options = options;
         _prompt = prompt;
         _logger = logger;
         _gate = new SemaphoreSlim(options.MaxConcurrentRequests, options.MaxConcurrentRequests);
         _endpoint = new Uri(options.BaseUrl!.Trim().TrimEnd('/') + "/chat/completions");
-        _extra = LlmExtraBody.Parse(options.ExtraBodyJson, options.MaxTokensParameter, "Llm:ExtraBodyJson").Fields; // validated above
+        _extra = LlmExtraBody.Parse(options.ExtraBodyJson, options.MaxTokensParameter, $"{options.SettingPrefix}ExtraBodyJson").Fields; // validated above
     }
+
+    /// <summary>The profile in use (empty for the flat <c>Llm:*</c> settings).</summary>
+    public string ProfileName => _options.ProfileName;
+
+    /// <summary>The model name that is sent, or "(sunucu varsayılanı)" when none is.</summary>
+    public string ModelLabel => _options.ModelLabel;
 
     public string? PromptVersion => _prompt.Version;
 
@@ -112,12 +121,14 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             messages.Add(new { role = message.Role == MessageRole.User ? "user" : "assistant", content = message.Text });
         }
 
-        var body = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(_options.Model))
         {
-            ["model"] = _options.Model,
-            ["messages"] = messages,
-            ["stream"] = true,
-        };
+            body["model"] = _options.Model; // a profile without a model sends none: the server uses its own
+        }
+
+        body["messages"] = messages;
+        body["stream"] = true;
         if (_options.Temperature is { } temperature)
         {
             body["temperature"] = temperature;
@@ -198,7 +209,11 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
-            if (_options.UsesApiKeyHeader)
+            if (_options.UsesNoAuth)
+            {
+                // AuthScheme None: no authentication header of any kind is sent.
+            }
+            else if (_options.UsesApiKeyHeader)
             {
                 // The key travels in the configured header ONLY: no Authorization header is sent in this mode.
                 request.Headers.TryAddWithoutValidation(_options.AuthHeaderName, _options.ApiKey);
@@ -306,7 +321,7 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
     }
 
     /// <summary>What one line of the stream says. <c>ReasoningChars</c> is a LENGTH: the reasoning text itself is never returned.</summary>
-    internal readonly record struct SseEvent(EventKind Kind, string? Text = null, int ReasoningChars = 0, int? CompletionTokens = null);
+    internal readonly record struct SseEvent(EventKind Kind, string? Text = null, int ReasoningChars = 0, int? CompletionTokens = null, string? ServerModel = null);
 
     /// <summary>
     /// One line of a server sent events stream. Only <c>delta.content</c> is ever returned as text. The reasoning fields
@@ -343,6 +358,14 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
                 ? n
                 : null;
 
+            // The model name the server reports (information for the evaluation report only; kept only if it looks like a model name).
+            var serverModel = root.TryGetProperty("model", out var reported)
+                && reported.ValueKind == JsonValueKind.String
+                && reported.GetString() is { } reportedName
+                && LlmEndpointPolicy.IsValidModelName(reportedName)
+                ? reportedName
+                : null;
+
             var reasoning = 0;
             string? text = null;
             if (root.TryGetProperty("choices", out var choices)
@@ -369,8 +392,8 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
             }
 
             return text is null
-                ? new SseEvent(EventKind.Skip, null, reasoning, tokens) // role only, finish reason, usage, reasoning, an empty word
-                : new SseEvent(EventKind.Content, text, reasoning, tokens);
+                ? new SseEvent(EventKind.Skip, null, reasoning, tokens, serverModel) // role only, finish reason, usage, reasoning, an empty word
+                : new SseEvent(EventKind.Content, text, reasoning, tokens, serverModel);
         }
         catch (JsonException)
         {
@@ -427,6 +450,11 @@ public sealed class OpenAiCompatibleChatResponder : IChatResponder
                     if (parsed.CompletionTokens is { } tokens)
                     {
                         stats.CompletionTokens = tokens;
+                    }
+
+                    if (parsed.ServerModel is { } reported)
+                    {
+                        stats.ServerModel = reported;
                     }
 
                     switch (parsed.Kind)
