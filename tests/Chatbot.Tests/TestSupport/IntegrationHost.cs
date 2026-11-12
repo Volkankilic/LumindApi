@@ -61,7 +61,7 @@ public sealed class IntegrationHost : IAsyncLifetime
     /// <summary>The real pipeline with the real, rule based crisis detector (the default host swaps in the marker detector).</summary>
     public ApiFactory NewFactoryWithTheRealCrisisDetector() => new(stubServices: false, realDatabase: true);
 
-    public static string Document => "0.1-taslak";
+    public static string Document => "0.2-taslak";
 
     /// <summary>Inserts an `itest-` participant (code hash only) and remembers it for the teardown.</summary>
     public async Task<TestParticipant> CreateParticipantAsync(ParticipantStatus status = ParticipantStatus.Invited)

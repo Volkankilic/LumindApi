@@ -182,7 +182,7 @@ public class AuthorizationTests
         var client = factory.Authed();
 
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/me")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/consents", HttpHelpers.Json("""{"records":[{"type":"privacyNotice","version":"0.1-taslak","granted":true}]}"""))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/consents", HttpHelpers.Json("""{"records":[{"type":"privacyNotice","version":"0.2-taslak","granted":true}]}"""))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsync("/api/me/nickname", HttpHelpers.Json("""{"nickname":"Mavi"}"""))).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync("/api/me")).StatusCode);
     }
@@ -346,7 +346,7 @@ public class AuthEndpointTests
     public async Task TheStateJson_IsCamelCase_WithTheClientsExactShape()
     {
         using var factory = new ApiFactory();
-        factory.Participants.State = new ParticipantState(StubAuthService.ParticipantId, "Deneme", "0.1-taslak", new ConsentState("0.1-taslak", true, false));
+        factory.Participants.State = new ParticipantState(StubAuthService.ParticipantId, "Deneme", "0.2-taslak", new ConsentState("0.2-taslak", true, false));
         var response = await factory.Authed().GetAsync("/api/me");
         var body = await response.Body();
 
@@ -469,7 +469,7 @@ public class OnboardingValidationTests
     {
         using var factory = new ApiFactory();
         var response = await factory.Authed().PostAsync("/api/consents", HttpHelpers.Json(
-            """{"records":[{"type":"explicitConsent","version":"0.1-taslak","granted":true},{"type":"researchUse","version":"0.1-taslak","granted":false}]}"""));
+            """{"records":[{"type":"explicitConsent","version":"0.2-taslak","granted":true},{"type":"researchUse","version":"0.2-taslak","granted":false}]}"""));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 }

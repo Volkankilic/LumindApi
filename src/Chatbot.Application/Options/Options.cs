@@ -111,9 +111,9 @@ public sealed class DocumentsOptions
     public const string Section = "Documents";
 
     // Must equal client/src/app/core/legal/versions.ts.
-    public string PrivacyNoticeVersion { get; set; } = "0.1-taslak";
+    public string PrivacyNoticeVersion { get; set; } = "0.2-taslak";
 
-    public string ConsentVersion { get; set; } = "0.1-taslak";
+    public string ConsentVersion { get; set; } = "0.2-taslak";
 
     public DocumentVersions ToVersions() => new(PrivacyNoticeVersion, ConsentVersion);
 }
