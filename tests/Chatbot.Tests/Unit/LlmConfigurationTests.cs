@@ -520,17 +520,36 @@ public class LlmConfigurationTests
     }
 
     [Fact]
-    public void TheAiReminder_IsOnlyForTheFirstReply_ARealQuestion_MedicalRequestsAndCrisisSigns_NeverAsAnOpening()
+    public void TheAiReminder_IsOnlyForTheFirstReply_OneShortSentence_AndOtherwiseOnlyAnHonestAnswerToARealQuestion()
     {
         var text = SystemPromptText.LoadEmbedded().Text;
         var reminder = Section(text, "Yapay zekâ olduğunu hatırlatma");
 
-        Assert.Contains("yalnızca şu durumlarda söyle; diğer yanıtlarda söyleme", reminder, StringComparison.Ordinal);
-        Assert.Contains("(a) Görüşmenin İLK yanıtında", reminder, StringComparison.Ordinal);
-        Assert.Contains("BİR cümleyle", reminder, StringComparison.Ordinal);
-        Assert.Contains("yanıtın başında değil", reminder, StringComparison.Ordinal);
-        Assert.Contains("(b) Kişi gerçekten insan olup olmadığını sorarsa", reminder, StringComparison.Ordinal);
-        Assert.Contains("(c) Kişi tıbbi bilgi, ilaç, doz ya da tanı isterse veya kriz belirtisi gösterirse", reminder, StringComparison.Ordinal);
+        // the strict wording (taken from the v4 draft): ONLY the first reply, ONE short sentence, never as an opening
+        Assert.Contains("SADECE görüşmenin İLK yanıtında söyle", reminder, StringComparison.Ordinal);
+        Assert.Contains("TEK kısa cümle yaz", reminder, StringComparison.Ordinal);
+        Assert.Contains("Yanıtın başında değil", reminder, StringComparison.Ordinal);
+
+        // after the first reply the phrases never appear; the one exception is a direct "are you human" question
+        Assert.Contains("İlk yanıttan sonra HİÇBİR yanıtta \"yapay zekâ olarak\", \"ben bir yapay zekâyım\" ya da benzeri bir söz yazma", reminder, StringComparison.Ordinal);
+        Assert.Contains("Tek istisna: kişi doğrudan \"sen insan mısın\", \"gerçek misin\" diye sorarsa dürüstçe cevap ver", reminder, StringComparison.Ordinal);
+
+        // v3's third case (medical requests and crisis signs) is gone: those replies state the limit without the phrase
+        Assert.DoesNotContain("(c)", reminder, StringComparison.Ordinal);
+        Assert.DoesNotContain("yalnızca şu durumlarda söyle", reminder, StringComparison.Ordinal);
+
+        // no human feelings or experiences (named as things NOT to write)
+        foreach (var claim in new[] { "\"Beni mutlu etti\"", "\"üzüldüm\"", "\"hissediyorum\"" })
+        {
+            Assert.Contains(claim, reminder, StringComparison.Ordinal);
+        }
+
+        // only the reminder was tightened: the v4 draft's other changes are NOT in this prompt
+        Assert.DoesNotContain("KOŞULSUZ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("BİR DAHA yazma", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASLA ret ya da uyarıyla", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Aynı öneriyi iki turda", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("bu çok zor olmalı", text, StringComparison.Ordinal);
 
         // the v1 wording that made the reminder appear in every reply is gone
         Assert.DoesNotContain("kendini tanıtmadıysan", text, StringComparison.Ordinal);
@@ -708,7 +727,7 @@ public class LlmConfigurationTests
         var text = SystemPromptText.LoadEmbedded().Text;
         var format = Section(text, "Yanıtın biçimi");
 
-        Assert.Contains("yalnızca şu durumlarda söyle; diğer yanıtlarda söyleme", Section(text, "Yapay zekâ olduğunu hatırlatma"), StringComparison.Ordinal);
+        Assert.Contains("SADECE görüşmenin İLK yanıtında söyle", Section(text, "Yapay zekâ olduğunu hatırlatma"), StringComparison.Ordinal);
         foreach (var phrase in new[] { "çok doğal", "çok kıymetli", "çok anlaşılır", "çok insani", "gerçekten değerli" })
         {
             Assert.Contains($"\"{phrase}\"", format, StringComparison.Ordinal);
